@@ -134,7 +134,7 @@ class _CenterButton extends StatelessWidget {
                 shape: BoxShape.circle,
                 boxShadow: const [AppShadows.main],
               ),
-              child: const Icon(Icons.add_rounded, size: 30, color: AppColors.white),
+              child: const Icon(Icons.note_add_rounded, size: 30, color: AppColors.white),
             ),
             const SizedBox(height: 6),
             Text('Nouveau', style: labelStyle),

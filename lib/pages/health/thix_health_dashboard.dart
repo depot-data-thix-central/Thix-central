@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
+import 'package:thix_central/health/thix_ui_feedback.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 
@@ -76,7 +77,7 @@ String _displayNameFromEmail(String? email, ThixRole role) {
   final localPart = email?.split('@').first.trim();
   if (localPart != null && localPart.isNotEmpty) {
     final pieces = localPart.split(RegExp(r'[._-]+')).where((part) => part.isNotEmpty).toList();
-    if (pieces.isNotEmpty) {
+    if (pieces.isNotEmpty && pieces.first.isNotEmpty) {
       return pieces.first[0].toUpperCase() + pieces.first.substring(1);
     }
   }
@@ -906,6 +907,7 @@ class _AvatarBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final trimmedName = name.trim();
     return Container(
       width: 56,
       height: 56,
@@ -915,7 +917,7 @@ class _AvatarBadge extends StatelessWidget {
       ),
       alignment: Alignment.center,
       child: Text(
-        name.trim().isEmpty ? 'T' : name.trim()[0].toUpperCase(),
+        trimmedName.isEmpty ? 'T' : trimmedName[0].toUpperCase(),
         style: context.textStyles.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w900),
       ),
     );
@@ -978,10 +980,7 @@ class _ModuleSection {
   final List<_FeatureItem> items;
 }
 
-void _showInfo(BuildContext context, String label) {
-  ScaffoldMessenger.of(context).hideCurrentSnackBar();
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label prêt à être utilisé.')));
-}
+void _showInfo(BuildContext context, String label) => showThixFeatureReadySnackBar(context, label);
 
 List<_ActionItem> _quickItemsFor(ThixRole role) {
   switch (role) {

@@ -49,7 +49,7 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
-    final display = user?.email ?? (user == null ? 'Invité THIX Santé' : user.id);
+    final display = user?.email ?? 'Invité THIX Santé';
     final email = user?.email;
 
     return AnimatedBuilder(
@@ -117,7 +117,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Détection automatique via ${role.domainHint}, avec possibilité de basculer manuellement entre Patient, Médecin et Pharmacie.',
+                          'Détection automatique selon le domaine de l’email (ex. adresse finissant par ${role.domainHint}), avec possibilité de basculer manuellement entre Patient, Médecin et Pharmacie.',
                           style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
                         ),
                         const SizedBox(height: 12),

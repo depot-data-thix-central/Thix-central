@@ -144,6 +144,7 @@ class ThixRoleController extends ChangeNotifier {
     return ThixRole.patient;
   }
 
+  /// Applies automatic role detection only until the user chooses a role manually.
   void syncFromEmail(String? email) {
     if (_manualSelection) return;
     final detected = detectFromEmail(email);

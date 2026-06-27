@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
+import 'package:thix_central/health/thix_ui_feedback.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
@@ -189,7 +190,7 @@ class _ServiceTile extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: InkWell(
-        onTap: () => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${item.title} prêt à être utilisé.'))),
+        onTap: () => showThixFeatureReadySnackBar(context, item.title),
         borderRadius: BorderRadius.circular(AppRadius.serviceCard),
         splashColor: Colors.transparent,
         highlightColor: Colors.transparent,
