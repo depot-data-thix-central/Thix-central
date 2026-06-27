@@ -42,7 +42,7 @@ class _ThixBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.paddingOf(context).bottom;
-    const barHeight = 82.0;
+    const barHeight = 88.0;
 
     return SizedBox(
       height: barHeight + bottom,
@@ -64,27 +64,27 @@ class _ThixBottomNav extends StatelessWidget {
                   children: [
                     _NavItem(
                       label: 'Accueil',
-                      icon: Icons.home,
+                      icon: Icons.home_rounded,
                       selected: currentIndex == 0,
                       onTap: () => onTap(0),
                     ),
                     _NavItem(
-                      label: 'Services',
-                      icon: Icons.grid_view_rounded,
+                      label: 'Santé',
+                      icon: Icons.favorite_outline_rounded,
                       selected: currentIndex == 1,
                       onTap: () => onTap(1),
                     ),
-                    const SizedBox(width: 64),
+                    const SizedBox(width: 76),
                     _NavItem(
                       label: 'Messages',
-                      icon: Icons.chat_bubble_outline,
+                      icon: Icons.chat_bubble_outline_rounded,
                       selected: currentIndex == 3,
                       onTap: () => onTap(3),
                       badgeCount: 3,
                     ),
                     _NavItem(
                       label: 'Profil',
-                      icon: Icons.person_outline,
+                      icon: Icons.person_outline_rounded,
                       selected: currentIndex == 4,
                       onTap: () => onTap(4),
                     ),
@@ -94,7 +94,7 @@ class _ThixBottomNav extends StatelessWidget {
             ),
           ),
           Positioned(
-            bottom: bottom + 18,
+            bottom: bottom + 6,
             child: _CenterButton(selected: currentIndex == 2, onTap: () => onTap(2)),
           ),
         ],
@@ -110,21 +110,35 @@ class _CenterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final labelStyle = Theme.of(context).textTheme.labelSmall?.copyWith(
+      fontSize: 11,
+      fontWeight: FontWeight.w700,
+      color: selected ? AppColors.primaryBlue : AppColors.textSecondary,
+      letterSpacing: -0.2,
+    );
+
     return GestureDetector(
       onTap: onTap,
       child: AnimatedScale(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOut,
         scale: selected ? 1.0 : 0.98,
-        child: Container(
-          width: 64,
-          height: 64,
-          decoration: BoxDecoration(
-            gradient: AppColors.primaryBlueGradient,
-            shape: BoxShape.circle,
-            boxShadow: const [AppShadows.main],
-          ),
-          child: const Icon(Icons.fingerprint, size: 28, color: AppColors.white),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                gradient: AppColors.primaryBlueGradient,
+                shape: BoxShape.circle,
+                boxShadow: const [AppShadows.main],
+              ),
+              child: const Icon(Icons.add_rounded, size: 30, color: AppColors.white),
+            ),
+            const SizedBox(height: 6),
+            Text('Nouveau', style: labelStyle),
+          ],
         ),
       ),
     );
