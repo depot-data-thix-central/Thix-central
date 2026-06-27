@@ -9,6 +9,7 @@ import 'package:thix_central/market/pages/market_cart_page.dart';
 import 'package:thix_central/market/pages/market_home_page.dart';
 import 'package:thix_central/market/pages/market_orders_page.dart';
 import 'package:thix_central/market/pages/market_product_detail_page.dart';
+import 'package:thix_central/market/pages/market_sell_page.dart';
 import 'package:thix_central/pages/app_shell/app_shell.dart';
 import 'package:thix_central/pages/home/thix_home_page.dart';
 import 'package:thix_central/pages/messages/messages_page.dart';
@@ -59,6 +60,7 @@ class AppRouter {
         routes: [
           GoRoute(path: 'cart', name: 'market_cart', pageBuilder: (context, state) => const MaterialPage(child: MarketCartPage())),
           GoRoute(path: 'orders', name: 'market_orders', pageBuilder: (context, state) => const MaterialPage(child: MarketOrdersPage())),
+          GoRoute(path: 'sell', name: 'market_sell', pageBuilder: (context, state) => const MaterialPage(child: MarketSellPage())),
           GoRoute(
             path: 'product/:id',
             name: 'market_product',

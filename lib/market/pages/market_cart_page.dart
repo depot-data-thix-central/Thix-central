@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:thix_central/market/models/market_cart_item.dart';
-import 'package:thix_central/market/pages/market_home_page.dart';
+import 'package:thix_central/market/widgets/market_product_thumb.dart';
 import 'package:thix_central/market/services/market_cart_service.dart';
 import 'package:thix_central/market/services/market_order_service.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';

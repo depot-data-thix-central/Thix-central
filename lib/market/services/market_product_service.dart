@@ -5,7 +5,7 @@ import 'package:thix_central/market/services/supabase_client_provider.dart';
 class MarketProductService {
   const MarketProductService();
 
-  Future<List<MarketProduct>> listActive({String? query, int limit = 30}) async {
+  Future<List<MarketProduct>> listActive({String? query, int limit = 30, String orderBy = 'created_at', bool ascending = false}) async {
     try {
       final q = (query ?? '').trim();
       var builder = SupabaseClientProvider.client
@@ -13,7 +13,7 @@ class MarketProductService {
           .select('id,seller_id,title,description,price_cents,currency,stock,is_active,created_at,updated_at,market_product_media(url,sort_order)')
           .eq('is_active', true);
       if (q.isNotEmpty) builder = builder.filter('title', 'ilike', '%$q%');
-      final rows = await builder.order('created_at', ascending: false).limit(limit);
+      final rows = await builder.order(orderBy, ascending: ascending).limit(limit);
       return (rows as List)
           .whereType<Map>()
           .map((e) => MarketProduct.fromJson(e.cast<String, dynamic>()))

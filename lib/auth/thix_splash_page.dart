@@ -17,6 +17,7 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
   late final Animation<double> _fade;
   late final Animation<double> _glow;
   late final Animation<double> _rot;
+  late final Animation<double> _pulse;
   Timer? _timer;
 
   @override
@@ -26,6 +27,7 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
     _fade = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
     _glow = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _c, curve: const Interval(0.15, 1.0, curve: Curves.easeOutCubic)));
     _rot = Tween<double>(begin: -0.06, end: 0.03).animate(CurvedAnimation(parent: _c, curve: Curves.easeInOutCubic));
+    _pulse = Tween<double>(begin: 0.985, end: 1.02).animate(CurvedAnimation(parent: _c, curve: const Interval(0.10, 1.0, curve: Curves.easeInOutCubic)));
     _c.forward();
 
     _timer = Timer(const Duration(milliseconds: 2600), _goNext);
@@ -45,7 +47,8 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
     if (session != null) {
       context.go('/');
     } else {
-      context.go('/auth/signup');
+      // No separate THIX Market account: only Supabase Auth.
+      context.go('/auth/login');
     }
   }
 
@@ -53,62 +56,117 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(gradient: AppColors.thixIdDarkGradient),
+      backgroundColor: AppColors.lightGrayBackground,
+      body: Stack(
+        children: [
+          const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(color: AppColors.lightGrayBackground))),
+          // Blue header band like the homepage, but slightly taller to feel “splash”.
+          const Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _TopBand(),
+          ),
+          // Soft premium blobs (kept, but tuned for light background).
+          const Positioned(top: -140, left: -120, child: _SplashBlob(color: AppColors.primaryBlue, size: 380)),
+          const Positioned(bottom: -170, right: -140, child: _SplashBlob(color: AppColors.accentPurple, size: 420)),
+          Center(
+            child: AnimatedBuilder(
+              animation: _c,
+              builder: (context, _) {
+                final glowAlpha = (0.10 + _glow.value * 0.28).clamp(0.0, 0.40);
+                return Opacity(
+                  opacity: _fade.value,
+                  child: Transform.rotate(
+                    angle: _rot.value,
+                    child: Transform.scale(
+                      scale: _pulse.value,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 96,
+                            height: 96,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: AppColors.primaryBlueGradient,
+                              boxShadow: [
+                                BoxShadow(color: AppColors.primaryBlue.withValues(alpha: glowAlpha), blurRadius: 26, spreadRadius: 2),
+                              ],
+                              border: Border.all(color: AppColors.white.withValues(alpha: 0.65), width: 1),
+                            ),
+                            alignment: Alignment.center,
+                            child: Text('T', style: context.textStyles.displaySmall?.copyWith(color: AppColors.white, fontWeight: FontWeight.w900)),
+                          ),
+                          const SizedBox(height: 18),
+                          Text(
+                            'THIX ID',
+                            style: context.textStyles.titleLarge?.copyWith(color: AppColors.darkNavy, fontWeight: FontWeight.w900, letterSpacing: 0.8),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Your Secure Digital Identity',
+                            style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary, height: 1.35),
+                          ),
+                          const SizedBox(height: 22),
+                          SizedBox(
+                            width: 110,
+                            child: LinearProgressIndicator(
+                              minHeight: 3,
+                              backgroundColor: cs.primary.withValues(alpha: 0.12),
+                              valueColor: AlwaysStoppedAnimation(cs.primary),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TopBand extends StatelessWidget {
+  const _TopBand();
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.paddingOf(context).top;
+    return ClipRRect(
+      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
+      child: SizedBox(
+        height: top + 210,
         child: Stack(
           children: [
-            const Positioned(top: -140, left: -120, child: _SplashBlob(color: AppColors.thixCyanGlow, size: 360)),
-            const Positioned(bottom: -160, right: -120, child: _SplashBlob(color: AppColors.thixPurpleGlow, size: 380)),
-            Center(
-              child: AnimatedBuilder(
-                animation: _c,
-                builder: (context, _) {
-                  final glowAlpha = (0.20 + _glow.value * 0.45).clamp(0.0, 0.65);
-                  final scale = 0.98 + (_glow.value * 0.03);
-                  return Opacity(
-                    opacity: _fade.value,
+            const Positioned.fill(child: DecoratedBox(decoration: BoxDecoration(gradient: AppColors.headerGradient))),
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Opacity(
+                  opacity: 0.14,
+                  child: Align(
+                    alignment: const Alignment(1.15, -0.55),
                     child: Transform.rotate(
-                      angle: _rot.value,
-                      child: Transform.scale(
-                        scale: scale,
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 96,
-                              height: 96,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: AppColors.thixIdCyanGradient,
-                                boxShadow: [
-                                  BoxShadow(color: AppColors.thixCyanGlow.withValues(alpha: glowAlpha), blurRadius: 26, spreadRadius: 2),
-                                ],
-                              ),
-                              alignment: Alignment.center,
-                              child: Text('T', style: context.textStyles.displaySmall?.copyWith(color: Colors.black, fontWeight: FontWeight.w900)),
-                            ),
-                            const SizedBox(height: 18),
-                            Text('THIX ID', style: context.textStyles.titleLarge?.copyWith(color: cs.onSurface, fontWeight: FontWeight.w900, letterSpacing: 0.8)),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Your Secure Digital Identity',
-                              style: context.textStyles.bodySmall?.copyWith(color: cs.onSurface.withValues(alpha: 0.70), height: 1.35),
-                            ),
-                            const SizedBox(height: 22),
-                            SizedBox(
-                              width: 110,
-                              child: LinearProgressIndicator(
-                                minHeight: 3,
-                                backgroundColor: cs.onSurface.withValues(alpha: 0.12),
-                                valueColor: const AlwaysStoppedAnimation(AppColors.thixCyanGlow),
-                              ),
-                            ),
-                          ],
+                      angle: -0.12,
+                      child: Container(
+                        width: 320,
+                        height: 220,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(42),
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [AppColors.white.withValues(alpha: 0.40), AppColors.white.withValues(alpha: 0.02)],
+                          ),
                         ),
                       ),
                     ),
-                  );
-                },
+                  ),
+                ),
               ),
             ),
           ],

@@ -130,6 +130,9 @@ class AppColors {
   static const Color accentGreen2 = Color(0xFF2AC670);
   static const Color accentBlue3 = Color(0xFF2563EB);
 
+  // THIX Market
+  static const Color marketBannerBlue = Color(0xFF0B1B3A);
+
   static const LinearGradient headerGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
