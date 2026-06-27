@@ -5,6 +5,9 @@ import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
+const _heroStrongWhite = Color(0xEBFFFFFF);
+const _heroSoftWhite = Color(0xE6FFFFFF);
+
 class ServicesPage extends StatefulWidget {
   const ServicesPage({super.key});
 
@@ -19,7 +22,8 @@ class _ServicesPageState extends State<ServicesPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _roleController.syncFromEmail(SupabaseClientProvider.clientOrNull?.auth.currentUser?.email);
+      final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+      _roleController.syncFromSession(appMetadata: user?.appMetadata, userMetadata: user?.userMetadata);
     });
   }
 
@@ -55,11 +59,11 @@ class _ServicesPageState extends State<ServicesPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Expérience ${role.label.toLowerCase()}', style: context.textStyles.labelLarge?.copyWith(color: Colors.white.withValues(alpha: 0.92), fontWeight: FontWeight.w700)),
+                    Text('Expérience ${role.label.toLowerCase()}', style: context.textStyles.labelLarge?.copyWith(color: _heroStrongWhite, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 8),
                     Text(role.headline, style: context.textStyles.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
                     const SizedBox(height: 8),
-                    Text(role.subtitle, style: context.textStyles.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.90), height: 1.35)),
+                    Text(role.subtitle, style: context.textStyles.bodyMedium?.copyWith(color: _heroSoftWhite, height: 1.35)),
                   ],
                 ),
               ),

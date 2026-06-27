@@ -108,17 +108,6 @@ extension ThixRoleX on ThixRole {
         );
     }
   }
-
-  String get domainHint {
-    switch (this) {
-      case ThixRole.patient:
-        return '@patient.com';
-      case ThixRole.doctor:
-        return '@doctor.com';
-      case ThixRole.pharmacy:
-        return '@pharmacy.com';
-    }
-  }
 }
 
 class ThixRoleController extends ChangeNotifier {
@@ -126,30 +115,35 @@ class ThixRoleController extends ChangeNotifier {
 
   static final ThixRoleController instance = ThixRoleController._();
 
+  static const _allowedClaims = {
+    'patient': ThixRole.patient,
+    'doctor': ThixRole.doctor,
+    'pharmacy': ThixRole.pharmacy,
+  };
+
   ThixRole _role = ThixRole.patient;
+  ThixRole? _verifiedRole;
   bool _manualSelection = false;
 
   ThixRole get role => _role;
+  ThixRole? get verifiedRole => _verifiedRole;
   bool get hasManualSelection => _manualSelection;
   List<ThixRole> get availableRoles => _defaultRoleOrder;
 
-  static ThixRole detectFromEmail(String? email) {
-    final normalized = email?.trim().toLowerCase() ?? '';
-    if (normalized.endsWith('@doctor.com')) {
-      return ThixRole.doctor;
+  /// Syncs the UI role from trusted session metadata only.
+  ///
+  /// This controller is presentation-only and must not infer privileged access
+  /// from spoofable values like email domains.
+  void syncFromSession({Map<String, dynamic>? appMetadata, Map<String, dynamic>? userMetadata}) {
+    final resolved = _parseRoleFromMetadata(appMetadata) ?? _parseRoleFromMetadata(userMetadata);
+    if (resolved == _verifiedRole && (_manualSelection || resolved == _role || resolved == null)) {
+      return;
     }
-    if (normalized.endsWith('@pharmacy.com')) {
-      return ThixRole.pharmacy;
-    }
-    return ThixRole.patient;
-  }
 
-  /// Applies automatic role detection only until the user chooses a role manually.
-  void syncFromEmail(String? email) {
-    if (_manualSelection) return;
-    final detected = detectFromEmail(email);
-    if (detected == _role) return;
-    _role = detected;
+    _verifiedRole = resolved;
+    if (!_manualSelection && resolved != null) {
+      _role = resolved;
+    }
     notifyListeners();
   }
 
@@ -162,8 +156,17 @@ class ThixRoleController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void resetToDetectedRole(String? email) {
+  void resetToVerifiedRole() {
+    if (_verifiedRole == null) return;
     _manualSelection = false;
-    syncFromEmail(email);
+    _role = _verifiedRole!;
+    notifyListeners();
+  }
+
+  ThixRole? _parseRoleFromMetadata(Map<String, dynamic>? metadata) {
+    if (metadata == null) return null;
+    final raw = (metadata['thix_role'] ?? metadata['role'])?.toString().trim().toLowerCase();
+    if (raw == null || raw.isEmpty) return null;
+    return _allowedClaims[raw];
   }
 }

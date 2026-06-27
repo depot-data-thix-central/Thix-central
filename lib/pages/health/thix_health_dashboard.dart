@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
 import 'package:thix_central/health/thix_ui_feedback.dart';
@@ -18,7 +19,8 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _roleController.syncFromEmail(SupabaseClientProvider.clientOrNull?.auth.currentUser?.email);
+      final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+      _roleController.syncFromSession(appMetadata: user?.appMetadata, userMetadata: user?.userMetadata);
     });
   }
 
@@ -73,12 +75,18 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
   }
 }
 
+String _capitalize(String value) {
+  if (value.isEmpty) return value;
+  final characters = value.characters;
+  return characters.first.toUpperCase() + characters.skip(1).toString();
+}
+
 String _displayNameFromEmail(String? email, ThixRole role) {
   final localPart = email?.split('@').first.trim();
   if (localPart != null && localPart.isNotEmpty) {
     final pieces = localPart.split(RegExp(r'[._-]+')).where((part) => part.isNotEmpty).toList();
     if (pieces.isNotEmpty && pieces.first.isNotEmpty) {
-      return pieces.first[0].toUpperCase() + pieces.first.substring(1);
+      return _capitalize(pieces.first);
     }
   }
   switch (role) {

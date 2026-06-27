@@ -22,7 +22,8 @@ class _ProfilePageState extends State<ProfilePage> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _roleController.syncFromEmail(SupabaseClientProvider.clientOrNull?.auth.currentUser?.email);
+      final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+      _roleController.syncFromSession(appMetadata: user?.appMetadata, userMetadata: user?.userMetadata);
     });
   }
 
@@ -36,6 +37,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await client.auth.signOut();
       if (!mounted) return;
       _roleController.selectRole(ThixRole.patient, manual: false);
+      _roleController.syncFromSession();
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Déconnecté')));
       setState(() {});
     } catch (e) {
@@ -50,12 +52,12 @@ class _ProfilePageState extends State<ProfilePage> {
     final cs = Theme.of(context).colorScheme;
     final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
     final display = user?.email ?? 'Invité THIX Santé';
-    final email = user?.email;
 
     return AnimatedBuilder(
       animation: _roleController,
       builder: (context, _) {
         final role = _roleController.role;
+        final verifiedRoleLabel = _roleController.verifiedRole?.label;
         return Scaffold(
           appBar: ThixTopBar(
             title: 'Profil',
@@ -117,7 +119,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Détection automatique selon le domaine de l’email (ex. adresse finissant par ${role.domainHint}), avec possibilité de basculer manuellement entre Patient, Médecin et Pharmacie.',
+                          'Le rôle affiché peut être ajusté manuellement ici. Les autorisations réelles doivent être validées côté serveur avant d’ouvrir un parcours métier sensible.',
                           style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
                         ),
                         const SizedBox(height: 12),
@@ -172,15 +174,14 @@ class _ProfilePageState extends State<ProfilePage> {
                           runSpacing: 8,
                           children: [
                             OutlinedButton.icon(
-                              onPressed: email == null ? null : () => _roleController.resetToDetectedRole(email),
+                              onPressed: _roleController.verifiedRole == null ? null : _roleController.resetToVerifiedRole,
                               icon: const Icon(Icons.sync_rounded),
-                              label: const Text('Revenir au rôle détecté'),
+                              label: const Text('Revenir au rôle vérifié'),
                             ),
-                            if (email != null)
-                              Text(
-                                'Email actif : $email',
-                                style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                              ),
+                            Text(
+                              verifiedRoleLabel == null ? 'Aucun rôle métier vérifié dans la session.' : 'Rôle vérifié : $verifiedRoleLabel',
+                              style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                            ),
                           ],
                         ),
                       ],

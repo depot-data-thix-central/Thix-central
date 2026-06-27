@@ -69,7 +69,7 @@ class _ThixBottomNav extends StatelessWidget {
                       onTap: () => onTap(0),
                     ),
                     _NavItem(
-                      label: 'Santé',
+                      label: 'Services',
                       icon: Icons.favorite_outline_rounded,
                       selected: currentIndex == 1,
                       onTap: () => onTap(1),
