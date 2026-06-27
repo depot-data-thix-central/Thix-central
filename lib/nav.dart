@@ -18,6 +18,9 @@ import 'package:thix_central/pages/profile/profile_page.dart';
 import 'package:thix_central/pages/reservation/reservation_home_page.dart';
 import 'package:thix_central/pages/scan/thix_scan_page.dart';
 import 'package:thix_central/pages/services/services_page.dart';
+import 'package:thix_central/pages/events/event_detail_page.dart';
+import 'package:thix_central/pages/events/models/event_models.dart';
+import 'package:thix_central/pages/events/event_tickets_page.dart';
 import 'package:thix_central/pages/events/events_home_page.dart';
 import 'package:thix_central/pages/health/health_home_page.dart';
 import 'package:thix_central/pages/jobs/jobs_home_page.dart';
@@ -60,7 +63,23 @@ class AppRouter {
         name: 'thix_id_card',
         pageBuilder: (context, state) => const MaterialPage(child: ThixIdentityCardPage()),
       ),
-      GoRoute(path: AppRoutes.events, name: 'events', pageBuilder: (context, state) => const MaterialPage(child: EventsHomePage())),
+      GoRoute(
+        path: AppRoutes.events,
+        name: 'events',
+        pageBuilder: (context, state) => const MaterialPage(child: EventsHomePage()),
+        routes: [
+          GoRoute(path: 'tickets', name: 'events_tickets', pageBuilder: (context, state) => const MaterialPage(child: EventTicketsPage())),
+          GoRoute(
+            path: ':eventId',
+            name: 'event_detail',
+            pageBuilder: (context, state) {
+              final eventId = state.pathParameters['eventId']!;
+              final extra = state.extra is ThixEvent ? state.extra as ThixEvent : null;
+              return MaterialPage(child: EventDetailPage(eventId: eventId, initialEvent: extra));
+            },
+          ),
+        ],
+      ),
       GoRoute(path: AppRoutes.reservation, name: 'reservation', pageBuilder: (context, state) => const MaterialPage(child: ReservationHomePage())),
       GoRoute(path: AppRoutes.health, name: 'health', pageBuilder: (context, state) => const MaterialPage(child: HealthHomePage())),
       GoRoute(path: AppRoutes.learning, name: 'learning', pageBuilder: (context, state) => const MaterialPage(child: LearningHomePage())),
@@ -132,6 +151,9 @@ class AppRoutes {
   static const String otpVerify = '/auth/verify';
   static const String thixIdCard = '/thix-id/card';
   static const String events = '/events';
+  static const String eventsTickets = '/events/tickets';
+
+  static String eventDetails(String id) => '/events/$id';
   static const String reservation = '/reservation';
   static const String health = '/health';
   static const String learning = '/learning';
