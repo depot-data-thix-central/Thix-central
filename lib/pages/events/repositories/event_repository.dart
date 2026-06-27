@@ -372,7 +372,7 @@ class ThixEventsRepository implements EventsRepository {
         totalPriceCents: 0,
         currency: 'XOF',
         status: EventTicketStatus.confirmed,
-        ticketCode: 'THX-2026-1201',
+        ticketCode: 'THX-202707-1201',
         qrPayload: 'thix-event:evt-thix-builders:seed',
         createdAt: now.subtract(const Duration(hours: 5)),
         attendeeName: 'Vous',
