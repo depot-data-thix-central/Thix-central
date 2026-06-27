@@ -79,6 +79,7 @@ class _ThixLoginPageState extends State<ThixLoginPage> {
   }
 
   Future<void> _checkBiometric() async {
+    if (kIsWeb) return;
     try {
       final can = await _auth.canCheckBiometrics;
       final supported = await _auth.isDeviceSupported();

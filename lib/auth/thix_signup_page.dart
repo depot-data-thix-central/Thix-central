@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/auth/widgets/thix_auth_scaffold.dart';
+import 'package:thix_central/auth/services/thix_profile_service.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 
@@ -15,6 +16,7 @@ class ThixSignUpPage extends StatefulWidget {
 }
 
 class _ThixSignUpPageState extends State<ThixSignUpPage> {
+  final _profileService = const ThixProfileService();
   final _fullName = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
@@ -122,6 +124,14 @@ class _ThixSignUpPageState extends State<ThixSignUpPage> {
       );
 
       if (res.user == null) throw AuthException('Inscription échouée: utilisateur non créé');
+
+      // Best-effort: populate public.users table when available.
+      await _profileService.ensureMyUserRow(
+        email: email,
+        fullName: fullName,
+        country: _country,
+        birthDate: _birthDate,
+      );
 
       // Send email OTP for verification.
       await client.auth.signInWithOtp(email: email, shouldCreateUser: false);

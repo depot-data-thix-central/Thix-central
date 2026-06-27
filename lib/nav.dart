@@ -13,9 +13,16 @@ import 'package:thix_central/market/pages/market_sell_page.dart';
 import 'package:thix_central/pages/app_shell/app_shell.dart';
 import 'package:thix_central/pages/home/thix_home_page.dart';
 import 'package:thix_central/pages/messages/messages_page.dart';
+import 'package:thix_central/pages/news/news_home_page.dart';
 import 'package:thix_central/pages/profile/profile_page.dart';
+import 'package:thix_central/pages/reservation/reservation_home_page.dart';
 import 'package:thix_central/pages/scan/thix_scan_page.dart';
 import 'package:thix_central/pages/services/services_page.dart';
+import 'package:thix_central/pages/events/events_home_page.dart';
+import 'package:thix_central/pages/health/health_home_page.dart';
+import 'package:thix_central/pages/jobs/jobs_home_page.dart';
+import 'package:thix_central/pages/learning/learning_home_page.dart';
+import 'package:thix_central/pages/social/social_home_page.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
@@ -53,6 +60,13 @@ class AppRouter {
         name: 'thix_id_card',
         pageBuilder: (context, state) => const MaterialPage(child: ThixIdentityCardPage()),
       ),
+      GoRoute(path: AppRoutes.events, name: 'events', pageBuilder: (context, state) => const MaterialPage(child: EventsHomePage())),
+      GoRoute(path: AppRoutes.reservation, name: 'reservation', pageBuilder: (context, state) => const MaterialPage(child: ReservationHomePage())),
+      GoRoute(path: AppRoutes.health, name: 'health', pageBuilder: (context, state) => const MaterialPage(child: HealthHomePage())),
+      GoRoute(path: AppRoutes.learning, name: 'learning', pageBuilder: (context, state) => const MaterialPage(child: LearningHomePage())),
+      GoRoute(path: AppRoutes.social, name: 'social', pageBuilder: (context, state) => const MaterialPage(child: SocialHomePage())),
+      GoRoute(path: AppRoutes.jobs, name: 'jobs', pageBuilder: (context, state) => const MaterialPage(child: JobsHomePage())),
+      GoRoute(path: AppRoutes.news, name: 'news', pageBuilder: (context, state) => const MaterialPage(child: NewsHomePage())),
       GoRoute(
         path: AppRoutes.market,
         name: 'market',
@@ -117,4 +131,11 @@ class AppRoutes {
   static const String signup = '/auth/signup';
   static const String otpVerify = '/auth/verify';
   static const String thixIdCard = '/thix-id/card';
+  static const String events = '/events';
+  static const String reservation = '/reservation';
+  static const String health = '/health';
+  static const String learning = '/learning';
+  static const String social = '/social';
+  static const String jobs = '/jobs';
+  static const String news = '/news';
 }
