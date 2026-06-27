@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:thix_central/nav.dart';
@@ -11,8 +13,13 @@ import 'package:thix_central/market/services/supabase_client_provider.dart';
 /// - Material 3 theming with light/dark modes
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // App can still start even if Supabase isn't configured.
-  await SupabaseClientProvider.initializeFromEnv();
+  // IMPORTANT (Publish/Web): never block the first Flutter frame on network/config
+  // initialization. If initialization hangs, the published link stays on
+  // "Loading ..." forever.
+  //
+  // We initialize Supabase asynchronously after runApp, and the splash screen
+  // will await it (with a timeout) before deciding where to route.
+  unawaited(SupabaseClientProvider.initializeFromEnv());
   runApp(const MyApp());
 }
 

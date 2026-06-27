@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
@@ -30,7 +31,10 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
     _pulse = Tween<double>(begin: 0.985, end: 1.02).animate(CurvedAnimation(parent: _c, curve: const Interval(0.10, 1.0, curve: Curves.easeInOutCubic)));
     _c.forward();
 
-    _timer = Timer(const Duration(milliseconds: 2600), _goNext);
+    _timer = Timer(const Duration(milliseconds: 2600), () {
+      // ignore: discarded_futures
+      _goNext();
+    });
   }
 
   @override
@@ -40,8 +44,19 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
     super.dispose();
   }
 
-  void _goNext() {
+  Future<void> _goNext() async {
     if (!mounted) return;
+
+    // Make sure Supabase is initialized (or fails fast) in published builds.
+    // This prevents routing decisions from happening while init is still in-flight.
+    if (!SupabaseClientProvider.isInitialized) {
+      try {
+        await SupabaseClientProvider.initializeFromEnv().timeout(const Duration(seconds: 3));
+      } catch (e) {
+        debugPrint('Splash supabase init timeout/failure: $e');
+      }
+    }
+
     final client = SupabaseClientProvider.clientOrNull;
     final session = client?.auth.currentSession;
     if (session != null) {
