@@ -130,7 +130,7 @@ class ThixEventsRepository implements EventsRepository {
     final available = currentEvent.seatsTotal <= 0 ? quantity : min(quantity, currentEvent.seatsRemaining);
     if (available <= 0) throw StateError('Aucune place disponible.');
 
-    final now = DateTime.now();
+    final now = DateTime.utc(2027, 7, 1, 10);
     final booking = EventTicketBooking(
       id: 'booking-${now.microsecondsSinceEpoch}',
       eventId: currentEvent.id,
@@ -188,7 +188,7 @@ class ThixEventsRepository implements EventsRepository {
   static String _ticketCode(DateTime now) => 'THX-${now.year}${now.month.toString().padLeft(2, '0')}-${Random().nextInt(9000) + 1000}';
 
   static EventModuleSnapshot _seedSnapshot() {
-    final now = DateTime.now();
+    final now = DateTime.utc(2027, 7, 1, 10);
     final events = <ThixEvent>[
       ThixEvent(
         id: 'evt-tayc-dakar',
