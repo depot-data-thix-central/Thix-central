@@ -32,10 +32,12 @@
   <title>thix_central</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- Passkeys Web SDK (required by flutter-passkeys on Flutter Web) -->
+  <!-- Passkeys Web SDK (required by flutter-passkeys on Flutter Web)
+       Must be loaded BEFORE Flutter bootstraps. -->
   <script defer src="https://github.com/corbado/flutter-passkeys/releases/download/2.4.0/bundle.js"></script>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <!-- Use `defer` (not `async`) so script order is preserved. -->
+  <script src="flutter_bootstrap.js" defer></script>
 </body>
 </html>
