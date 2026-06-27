@@ -615,12 +615,9 @@ class SocialSidebarSection extends StatelessWidget {
               _bullet(context, 'Utilisateurs bloqués : ${snapshot.moderation.blockedUsers}'),
               _bullet(context, 'RLS déployée : ${snapshot.moderation.rlsReady ? 'Oui' : 'Non'}'),
               const SizedBox(height: AppSpacing.sm),
-              Wrap(
-                spacing: AppSpacing.sm,
-                children: const [
-                  Chip(label: Text('Email notif · à venir')),
-                  Chip(label: Text('Thèmes chat · à venir')),
-                ],
+              Text(
+                'Prochain lot prévu : notifications email et thèmes personnalisés pour la messagerie.',
+                style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary),
               ),
             ],
           ),

@@ -135,7 +135,7 @@ class _SocialHomeView extends StatelessWidget {
     final challengePrizeController = TextEditingController();
     final quoteController = TextEditingController();
     var selectedKind = repostSource == null ? SocialPostKind.text : SocialPostKind.repost;
-    var communityName = 'Design Leaders';
+    var communityName = controller.snapshot.communities.isNotEmpty ? controller.snapshot.communities.first.name : 'Fil public';
 
     await showModalBottomSheet<void>(
       context: context,

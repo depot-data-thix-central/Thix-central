@@ -50,7 +50,7 @@ class SocialFeedService {
   }
 
   double buildSmartScore(SocialPost post) {
-    final ageHours = math.max(1, DateTime.now().difference(post.createdAt).inHours + 1);
+    final ageHours = math.max(1, DateTime.now().difference(post.createdAt).inHours);
     final freshnessBoost = 120 / ageHours;
     final connectionBoost = post.author.mutualConnections * 8;
     final mediaBoost = post.mediaUrls.isEmpty ? 0 : 12;
