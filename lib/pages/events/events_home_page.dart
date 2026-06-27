@@ -427,7 +427,7 @@ class _HeroCarousel extends StatelessWidget {
                               ElevatedButton(
                                 onPressed: () => onOpen(event),
                                 style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: event.category.color),
-                                child: const Text('Découvrir les événements'),
+                                child: const Text('Découvrir la sélection'),
                               ),
                               const Spacer(),
                               Text(service.formatMoney(event.priceCents), style: context.textStyles.titleSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
