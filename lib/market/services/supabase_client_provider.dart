@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:thix_central/supabase/supabase_config.dart';
 
 /// Central place to initialize and access Supabase safely.
 ///
@@ -15,13 +16,21 @@ class SupabaseClientProvider {
   /// Initializes Supabase using env vars.
   /// Returns `true` when ready; `false` when missing configuration.
   static Future<bool> initializeFromEnv() async {
+    if (_initialized) return true;
     try {
-      const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-      const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-      if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
-        throw Exception('Missing SUPABASE_URL / SUPABASE_ANON_KEY env vars');
+      // Dreamflow can provide the URL/key via the generated SupabaseConfig file.
+      // In some environments (Preview/Publish), `--dart-define` values may be
+      // absent, so we fall back to SupabaseConfig.
+      const envUrl = String.fromEnvironment('SUPABASE_URL');
+      const envAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+
+      final url = envUrl.isNotEmpty ? envUrl : SupabaseConfig.supabaseUrl;
+      final anonKey = envAnonKey.isNotEmpty ? envAnonKey : SupabaseConfig.anonKey;
+      if (url.isEmpty || anonKey.isEmpty) {
+        throw Exception('Missing Supabase configuration (URL / anon key)');
       }
-      await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
+
+      await Supabase.initialize(url: url, anonKey: anonKey, debug: kDebugMode);
       _initialized = true;
       _initError = null;
       return true;
@@ -44,7 +53,7 @@ class SupabaseClientProvider {
   static SupabaseClient get client {
     final c = clientOrNull;
     if (c == null) {
-      throw StateError('Supabase not initialized. Complete Supabase Project Setup in Dreamflow.');
+      throw StateError('Supabase not initialized. Please check Supabase connection / keys.');
     }
     return c;
   }
