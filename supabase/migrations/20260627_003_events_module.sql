@@ -159,7 +159,7 @@ declare
   v_booking public.thix_event_bookings%rowtype;
   v_user_id uuid := auth.uid();
   v_quantity integer := greatest(coalesce(p_quantity, 1), 1);
-  v_ticket_code text := 'THX-' || to_char(now(), 'YYYYMM') || '-' || lpad((floor(random() * 9999) + 1)::int::text, 4, '0');
+  v_ticket_code text := 'THX-' || to_char(now(), 'YYYYMM') || '-' || lpad((floor(random() * 9000) + 1000)::int::text, 4, '0');
 begin
   if v_user_id is null then
     raise exception 'Authentication required';
