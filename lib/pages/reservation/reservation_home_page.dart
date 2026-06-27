@@ -135,8 +135,8 @@ class _ReservationStats extends StatelessWidget {
                   child: Column(children: [
                     Icon(stats[i]['icon'] as IconData, color: cs.primary),
                     const SizedBox(height: AppSpacing.xs),
-                    Text(stats[i]['value']!, style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    Text(stats[i]['label']!, style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
+                    Text(stats[i]['value'] as String, style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    Text(stats[i]['label'] as String, style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
                   ]),
                 ),
               ),

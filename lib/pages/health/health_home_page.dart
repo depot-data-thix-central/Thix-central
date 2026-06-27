@@ -172,9 +172,9 @@ class _HealthServices extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               CircleAvatar(radius: 20, backgroundColor: cs.primary.withValues(alpha: 0.08), child: Icon(svc['icon'] as IconData, color: cs.primary)),
               const SizedBox(height: AppSpacing.sm),
-              Text(svc['title']!, style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
+              Text(svc['title'] as String, style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800)),
               const SizedBox(height: 4),
-              Text(svc['desc']!, style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
+              Text(svc['desc'] as String, style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
             ]),
           );
         },
