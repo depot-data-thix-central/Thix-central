@@ -1,11 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/market/models/market_cart_item.dart';
 import 'package:thix_central/market/pages/market_home_page.dart';
 import 'package:thix_central/market/services/market_cart_service.dart';
 import 'package:thix_central/market/services/market_order_service.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
@@ -22,8 +22,8 @@ class _MarketCartPageState extends State<MarketCartPage> {
   bool _checkingOut = false;
 
   Future<void> _checkout() async {
-    if (Supabase.instance.client.auth.currentUser == null) {
-      context.push('/login?next=/market/cart');
+    if (SupabaseClientProvider.clientOrNull?.auth.currentUser == null) {
+      context.push('/auth/login?next=/market/cart');
       return;
     }
     setState(() => _checkingOut = true);
@@ -57,7 +57,7 @@ class _MarketCartPageState extends State<MarketCartPage> {
         ),
       ),
       body: FutureBuilder<List<MarketCartItem>>(
-        future: Supabase.instance.client.auth.currentUser == null ? Future.value(const []) : _cart.listMyCart(),
+        future: SupabaseClientProvider.clientOrNull?.auth.currentUser == null ? Future.value(const []) : _cart.listMyCart(),
         builder: (context, snap) {
           if (snap.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
           if (snap.hasError) return Center(child: Text('Erreur: ${snap.error}'));
@@ -66,7 +66,7 @@ class _MarketCartPageState extends State<MarketCartPage> {
           return ListView(
             padding: const EdgeInsets.fromLTRB(AppSpacing.md, 10, AppSpacing.md, 140),
             children: [
-              if (Supabase.instance.client.auth.currentUser == null)
+              if (SupabaseClientProvider.clientOrNull?.auth.currentUser == null)
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(AppRadius.mainCard), border: Border.all(color: cs.outline.withValues(alpha: 0.14))),
@@ -75,7 +75,7 @@ class _MarketCartPageState extends State<MarketCartPage> {
                       Icon(Icons.lock_outline, color: cs.primary),
                       const SizedBox(width: 10),
                       Expanded(child: Text('Connecte-toi pour voir ton panier.', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant))),
-                      TextButton(onPressed: () => context.push('/login?next=/market/cart'), child: const Text('Connexion')),
+                      TextButton(onPressed: () => context.push('/auth/login?next=/market/cart'), child: const Text('Connexion')),
                     ],
                   ),
                 )

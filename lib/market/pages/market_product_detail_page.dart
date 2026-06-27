@@ -1,10 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/market/models/market_product.dart';
 import 'package:thix_central/market/services/market_cart_service.dart';
 import 'package:thix_central/market/services/market_product_service.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
@@ -22,9 +22,9 @@ class _MarketProductDetailPageState extends State<MarketProductDetailPage> {
   bool _adding = false;
 
   Future<void> _addToCart(MarketProduct p) async {
-    final user = Supabase.instance.client.auth.currentUser;
+    final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
     if (user == null) {
-      context.push('/login?next=/market/product/${p.id}');
+      context.push('/auth/login?next=/market/product/${p.id}');
       return;
     }
     setState(() => _adding = true);

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/market/models/market_product.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/market/services/market_product_service.dart';
 import 'package:thix_central/market/widgets/auth_required_panel.dart';
 import 'package:thix_central/theme.dart';
@@ -122,7 +122,7 @@ class _MarketHomePageState extends State<MarketHomePage> {
             },
           ),
           const SizedBox(height: 10),
-          if (Supabase.instance.client.auth.currentUser == null)
+          if (SupabaseClientProvider.clientOrNull?.auth.currentUser == null)
             Text('Connecte-toi pour acheter. Les produits restent visibles en public.', style: context.textStyles.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
         ],
       ),

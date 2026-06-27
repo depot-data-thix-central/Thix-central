@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:go_router/go_router.dart';
+import 'package:thix_central/auth/services/thix_profile_service.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
@@ -12,9 +14,16 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
+  final _profileService = const ThixProfileService();
+
   Future<void> _logout() async {
     try {
-      await Supabase.instance.client.auth.signOut();
+      final client = SupabaseClientProvider.clientOrNull;
+      if (client == null) {
+        debugPrint('Logout ignored: Supabase not initialized');
+        return;
+      }
+      await client.auth.signOut();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Déconnecté')));
       setState(() {});
@@ -28,9 +37,8 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final user = Supabase.instance.client.auth.currentUser;
+    final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
     final display = user?.email ?? (user == null ? 'Invité' : user.id);
-    final thixId = user == null ? 'Non connecté' : user.id;
     return Scaffold(
       appBar: ThixTopBar(
         title: 'Profil',
@@ -43,42 +51,49 @@ class _ProfilePageState extends State<ProfilePage> {
           highlightColor: Colors.transparent,
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.md, 110),
-        children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(gradient: AppColors.headerGradient, borderRadius: BorderRadius.circular(AppRadius.search)),
-            child: Row(
-              children: [
-                ThixAvatar(size: 58, initials: display.isEmpty ? 'T' : display.characters.first.toUpperCase()),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(display, style: context.textStyles.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
-                      const SizedBox(height: 4),
-                      Text('THIX ID: $thixId', style: context.textStyles.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88))),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(999), border: Border.all(color: Colors.white.withValues(alpha: 0.18))),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.verified, color: Colors.white, size: 16),
-                            const SizedBox(width: 6),
-                            Text(user == null ? 'Non connecté' : 'Connecté', style: context.textStyles.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
-                          ],
-                        ),
+      body: FutureBuilder<Map<String, dynamic>?>(
+        future: _profileService.getMyProfile(),
+        builder: (context, snap) {
+          final p = snap.data;
+          final thixId = user == null ? 'Non connecté' : ((p?['thix_id'] as String?) ?? 'THIX-PENDING');
+          final verified = user != null && (user.emailConfirmedAt != null || p?['email_verified'] == true);
+
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.md, 110),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(gradient: AppColors.headerGradient, borderRadius: BorderRadius.circular(AppRadius.search)),
+                child: Row(
+                  children: [
+                    ThixAvatar(size: 58, initials: display.isEmpty ? 'T' : display.characters.first.toUpperCase()),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(display, style: context.textStyles.titleLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
+                          const SizedBox(height: 4),
+                          Text('THIX ID: $thixId', style: context.textStyles.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.88))),
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(999), border: Border.all(color: Colors.white.withValues(alpha: 0.18))),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(verified ? Icons.verified : Icons.schedule, color: Colors.white, size: 16),
+                                const SizedBox(width: 6),
+                                Text(user == null ? 'Non connecté' : (verified ? 'Verified' : 'Pending'), style: context.textStyles.labelLarge?.copyWith(color: Colors.white, fontWeight: FontWeight.w800)),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
           const SizedBox(height: 14),
           _StatRow(),
           const SizedBox(height: 14),
@@ -89,7 +104,18 @@ class _ProfilePageState extends State<ProfilePage> {
             icon: Icons.shield,
           ),
           const SizedBox(height: 12),
-          _ActionTile(icon: Icons.qr_code_2, title: 'Afficher mon QR', subtitle: 'Partager votre THIX PASS'),
+          _ActionTile(
+            icon: Icons.qr_code_2,
+            title: 'Afficher mon QR',
+            subtitle: 'Partager votre THIX PASS',
+            onTap: () {
+              if (user == null) {
+                context.push('/auth/login?next=/thix-id/card');
+              } else {
+                context.push('/thix-id/card');
+              }
+            },
+          ),
           _ActionTile(icon: Icons.badge_outlined, title: 'Mon statut', subtitle: 'Niveau, score, notifications'),
           _ActionTile(icon: Icons.folder_copy_outlined, title: 'Documents', subtitle: 'Pièces & attestations'),
           _ActionTile(
@@ -99,7 +125,9 @@ class _ProfilePageState extends State<ProfilePage> {
             onTap: _logout,
             iconColor: cs.error,
           ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }

@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/nav.dart';
 import 'package:thix_central/theme.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 
 /// Main entry point for the application
 ///
@@ -11,17 +11,8 @@ import 'package:thix_central/theme.dart';
 /// - Material 3 theming with light/dark modes
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-    const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
-    if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
-      throw Exception('Missing SUPABASE_URL / SUPABASE_ANON_KEY env vars');
-    }
-    await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
-  } catch (e) {
-    debugPrint('Supabase init failed: $e');
-    // App can still start to show an error UI; network features will fail.
-  }
+  // App can still start even if Supabase isn't configured.
+  await SupabaseClientProvider.initializeFromEnv();
   runApp(const MyApp());
 }
 

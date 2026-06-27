@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/market/models/market_order.dart';
 import 'package:thix_central/market/services/market_order_service.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
@@ -25,7 +25,7 @@ class MarketOrdersPage extends StatelessWidget {
           highlightColor: Colors.transparent,
         ),
       ),
-      body: Supabase.instance.client.auth.currentUser == null
+      body: SupabaseClientProvider.clientOrNull?.auth.currentUser == null
           ? ListView(
               padding: const EdgeInsets.all(AppSpacing.md),
               children: [
@@ -37,7 +37,7 @@ class MarketOrdersPage extends StatelessWidget {
                       Icon(Icons.lock_outline, color: cs.primary),
                       const SizedBox(width: 10),
                       Expanded(child: Text('Connecte-toi pour voir tes commandes.', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant))),
-                      TextButton(onPressed: () => context.push('/login?next=/market/orders'), child: const Text('Connexion')),
+                      TextButton(onPressed: () => context.push('/auth/login?next=/market/orders'), child: const Text('Connexion')),
                     ],
                   ),
                 ),

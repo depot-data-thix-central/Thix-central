@@ -99,6 +99,30 @@ class AppColors {
   static const Color successGreen = Color(0xFF1BC47D);
   static const Color dangerRed = Color(0xFFFF3B30);
 
+  // THIX ID accents
+  static const Color thixCyanGlow = Color(0xFF2EF2FF);
+  static const Color thixPurpleGlow = Color(0xFF8B5CFF);
+
+  static const LinearGradient thixIdDarkGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color(0xFF050714),
+      Color(0xFF070B1A),
+      Color(0xFF0B1028),
+    ],
+  );
+
+  static const LinearGradient thixIdCyanGradient = LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color(0xFF2EF2FF),
+      Color(0xFF3A7BFF),
+      Color(0xFF8B5CFF),
+    ],
+  );
+
   // Accent colors used by service tiles (kept centralized to avoid scattered hex usage).
   static const Color accentPurple = Color(0xFF6D5CFF);
   static const Color accentOrange = Color(0xFFFF9F0A);

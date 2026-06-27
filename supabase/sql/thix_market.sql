@@ -31,9 +31,92 @@ create table if not exists public.profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
   display_name text,
   avatar_url text,
+  thix_id text,
+  country text,
+  birth_date date,
+  email_verified boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- If you ran an older version of this file, keep it forward-compatible.
+alter table public.profiles add column if not exists thix_id text;
+alter table public.profiles add column if not exists country text;
+alter table public.profiles add column if not exists birth_date date;
+alter table public.profiles add column if not exists email_verified boolean not null default false;
+
+create unique index if not exists idx_profiles_thix_id_unique on public.profiles (thix_id);
+
+-- =============================================================================
+-- THIX ID generator (immutable)
+-- =============================================================================
+
+create or replace function public._thix_random_block(len int)
+returns text
+language plpgsql
+as $$
+declare
+  alphabet text := 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  out_text text := '';
+  i int;
+  idx int;
+begin
+  for i in 1..len loop
+    idx := 1 + floor(random() * length(alphabet))::int;
+    out_text := out_text || substr(alphabet, idx, 1);
+  end loop;
+  return out_text;
+end;
+$$;
+
+create or replace function public.generate_thix_id()
+returns text
+language plpgsql
+as $$
+declare
+  candidate text;
+begin
+  loop
+    candidate := 'THIX-' || public._thix_random_block(4) || '-' || public._thix_random_block(4) || '-' || public._thix_random_block(4);
+    exit when not exists(select 1 from public.profiles p where p.thix_id = candidate);
+  end loop;
+  return candidate;
+end;
+$$;
+
+create or replace function public.set_profile_thix_id()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.thix_id is null or new.thix_id = '' then
+    new.thix_id := public.generate_thix_id();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_profiles_thix_id on public.profiles;
+create trigger trg_profiles_thix_id
+before insert on public.profiles
+for each row execute function public.set_profile_thix_id();
+
+create or replace function public.prevent_thix_id_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.thix_id is distinct from old.thix_id then
+    raise exception 'thix_id is immutable';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_profiles_thix_id_immutable on public.profiles;
+create trigger trg_profiles_thix_id_immutable
+before update on public.profiles
+for each row execute function public.prevent_thix_id_update();
 
 drop trigger if exists trg_profiles_updated_at on public.profiles;
 create trigger trg_profiles_updated_at

@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:thix_central/auth/thix_login_page.dart';
+import 'package:thix_central/auth/thix_otp_verify_page.dart';
+import 'package:thix_central/auth/thix_signup_page.dart';
+import 'package:thix_central/auth/thix_splash_page.dart';
+import 'package:thix_central/auth/thix_identity_card_page.dart';
 import 'package:thix_central/market/pages/market_cart_page.dart';
 import 'package:thix_central/market/pages/market_home_page.dart';
 import 'package:thix_central/market/pages/market_orders_page.dart';
@@ -14,8 +18,13 @@ import 'package:thix_central/pages/services/services_page.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
-    initialLocation: AppRoutes.home,
+    initialLocation: AppRoutes.splash,
     routes: [
+      GoRoute(
+        path: AppRoutes.splash,
+        name: 'splash',
+        pageBuilder: (context, state) => const NoTransitionPage(child: ThixSplashPage()),
+      ),
       GoRoute(
         path: AppRoutes.login,
         name: 'login',
@@ -23,6 +32,25 @@ class AppRouter {
           final next = state.uri.queryParameters['next'];
           return NoTransitionPage(child: ThixLoginPage(afterLoginRoute: next));
         },
+      ),
+      GoRoute(
+        path: AppRoutes.signup,
+        name: 'signup',
+        pageBuilder: (context, state) => const NoTransitionPage(child: ThixSignUpPage()),
+      ),
+      GoRoute(
+        path: AppRoutes.otpVerify,
+        name: 'otp_verify',
+        pageBuilder: (context, state) {
+          final email = state.uri.queryParameters['email'];
+          final pending = state.extra is Map<String, dynamic> ? state.extra as Map<String, dynamic> : null;
+          return MaterialPage(child: ThixOtpVerifyPage(email: email, pendingProfile: pending));
+        },
+      ),
+      GoRoute(
+        path: AppRoutes.thixIdCard,
+        name: 'thix_id_card',
+        pageBuilder: (context, state) => const MaterialPage(child: ThixIdentityCardPage()),
       ),
       GoRoute(
         path: AppRoutes.market,
@@ -82,5 +110,9 @@ class AppRoutes {
   static const String messages = '/messages';
   static const String profile = '/profile';
   static const String market = '/market';
-  static const String login = '/login';
+  static const String splash = '/splash';
+  static const String login = '/auth/login';
+  static const String signup = '/auth/signup';
+  static const String otpVerify = '/auth/verify';
+  static const String thixIdCard = '/thix-id/card';
 }
