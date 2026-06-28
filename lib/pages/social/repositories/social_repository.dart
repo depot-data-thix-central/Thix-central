@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/pages/social/models/social_models.dart';
 import 'package:thix_central/pages/social/services/social_feed_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 abstract class SocialRepository {
   Future<SocialModuleSnapshot> loadModule();
@@ -21,71 +22,185 @@ abstract class SocialRepository {
   Future<List<SocialConnectionSuggestion>> toggleConnection(String suggestionId);
 
   Future<List<SocialNotificationItem>> markNotificationAsRead(String notificationId);
+
+  Future<List<SocialStory>> fetchStories();
+
+  Future<void> createStory({required String mediaUrl, String? caption});
 }
 
 class ThixSocialRepository implements SocialRepository {
   ThixSocialRepository({SocialFeedService? feedService}) : _feedService = feedService ?? const SocialFeedService();
 
   final SocialFeedService _feedService;
-
   static SocialModuleSnapshot? _cache;
 
-  SocialModuleSnapshot get _snapshot => _cache ??= _buildSeedSnapshot();
+  SocialModuleSnapshot get _snapshot {
+    if (_cache == null) throw StateError('Repository not initialized. Call loadModule() first.');
+    return _cache!;
+  }
 
   @override
   Future<SocialModuleSnapshot> loadModule() async {
     final client = SupabaseClientProvider.clientOrNull;
     if (client == null) {
-      return _snapshot;
+      throw Exception('Supabase client not available');
     }
-    try {
-      final currentUserId = client.auth.currentUser?.id;
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) {
+      throw Exception('User not authenticated');
+    }
 
-      final rows = await client.from('social_posts').select('*').order('created_at', ascending: false).limit(30);
-      final posts = (rows as List)
-          .map(_asJsonMap)
-          .whereType<Map<String, dynamic>>()
-          .map(SocialPost.fromJson)
-          .toList();
+    // 1. Récupérer les posts
+    final postsRows = await client.from('social_posts')
+        .select('*')
+        .order('created_at', ascending: false)
+        .limit(30);
+    final posts = (postsRows as List)
+        .map((row) => SocialPost.fromJson(row))
+        .toList();
 
-      if (posts.isEmpty) return _snapshot;
-
-      final postIds = posts.map((post) => post.id).toList();
-      final likedIds = <String>{};
-      if (currentUserId != null) {
-        try {
-          final likeRows = await client.from('social_post_likes').select('post_id').eq('user_id', currentUserId).inFilter('post_id', postIds);
-          likedIds.addAll((likeRows as List).whereType<Map>().map((row) => (row['post_id'] ?? '').toString()));
-        } catch (error) {
-          debugPrint('social likes preload failed: $error');
-        }
+    // 2. Récupérer les likes de l'utilisateur
+    final postIds = posts.map((p) => p.id).toList();
+    final likedIds = <String>{};
+    if (postIds.isNotEmpty) {
+      try {
+        final likeRows = await client.from('social_post_likes')
+            .select('post_id')
+            .eq('user_id', currentUserId)
+            .inFilter('post_id', postIds);
+        likedIds.addAll((likeRows as List)
+            .whereType<Map>()
+            .map((row) => (row['post_id'] ?? '').toString()));
+      } catch (e) {
+        debugPrint('Failed to load likes: $e');
+        // On ne propage pas l'erreur ici, on continue sans likes
       }
-
-      final enriched = posts
-          .map(
-            (post) => post.copyWith(
-              isLiked: likedIds.contains(post.id),
-            ),
-          )
-          .toList();
-
-      _cache = _snapshot.copyWith(feed: enriched);
-      return _cache!;
-    } catch (error) {
-      debugPrint('social load fallback: $error');
-      return _snapshot;
     }
+    final enrichedPosts = posts.map((p) => p.copyWith(isLiked: likedIds.contains(p.id))).toList();
+
+    // 3. Récupérer les stories
+    final stories = await fetchStories();
+
+    // 4. Récupérer les suggestions (profil utilisateurs non connectés)
+    List<SocialConnectionSuggestion> suggestions = [];
+    try {
+      final profileRows = await client.from('profiles')
+          .select('id, display_name, occupation')
+          .neq('id', currentUserId)
+          .limit(10);
+      suggestions = (profileRows as List).map((row) {
+        final name = row['display_name'] ?? 'Inconnu';
+        final firstName = name.split(' ').first;
+        return SocialConnectionSuggestion(
+          id: row['id'].toString(),
+          name: name,
+          role: row['occupation'] ?? 'Membre',
+          mutualConnections: Random().nextInt(15) + 1,
+        );
+      }).toList();
+    } catch (e) {
+      debugPrint('Failed to load suggestions: $e');
+      // On laisse la liste vide, pas de fallback
+    }
+
+    // 5. Récupérer les notifications
+    List<SocialNotificationItem> notifications = [];
+    try {
+      final notifRows = await client.from('social_notifications')
+          .select('*')
+          .eq('user_id', currentUserId)
+          .order('created_at', ascending: false)
+          .limit(20);
+      notifications = (notifRows as List).map((row) => SocialNotificationItem(
+            id: row['id'].toString(),
+            title: row['title'] ?? 'Notification',
+            description: row['description'] ?? '',
+            createdAt: DateTime.parse(row['created_at']),
+            type: row['type'] ?? 'generic',
+            isUnread: row['is_unread'] ?? true,
+          )).toList();
+    } catch (e) {
+      debugPrint('Failed to load notifications: $e');
+      // On laisse liste vide
+    }
+
+    // 6. Construire le snapshot complet avec des données par défaut pour les parties non encore implémentées
+    _cache = SocialModuleSnapshot(
+      feed: enrichedPosts,
+      stories: stories,
+      suggestions: suggestions,
+      notifications: notifications,
+      communities: const [],           // À charger depuis une table plus tard
+      highlights: const [],            // À implémenter
+      conversations: const [],         // À charger depuis messages
+      trendingHashtags: const [],      // À calculer
+      analytics: const SocialAnalyticsSnapshot(profileViews: 0, contentViews: 0, likes: 0, comments: 0),
+      moderation: const SocialModerationSnapshot(hiddenPosts: 0, reportedPosts: 0, blockedUsers: 0, rlsReady: true),
+    );
+    return _cache!;
+  }
+
+  @override
+  Future<List<SocialStory>> fetchStories() async {
+    final client = SupabaseClientProvider.clientOrNull;
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) throw Exception('User not authenticated');
+
+    final now = DateTime.now().toIso8601String();
+    final rows = await client.from('social_stories')
+        .select('*, author:profiles(*)')
+        .gt('expires_at', now)
+        .order('created_at', ascending: false)
+        .limit(20);
+
+    final stories = (rows as List).map((row) => SocialStory.fromJson(row)).toList();
+
+    // Marquer les stories déjà vues
+    if (stories.isNotEmpty) {
+      try {
+        final viewedRows = await client.from('social_story_views')
+            .select('story_id')
+            .eq('user_id', currentUserId);
+        final viewedIds = (viewedRows as List).map((row) => row['story_id'].toString()).toSet();
+        return stories.map((s) => s.copyWith(isViewed: viewedIds.contains(s.id))).toList();
+      } catch (e) {
+        debugPrint('Failed to load story views: $e');
+      }
+    }
+    return stories;
+  }
+
+  @override
+  Future<void> createStory({required String mediaUrl, String? caption}) async {
+    final client = SupabaseClientProvider.clientOrNull;
+    if (client == null) throw Exception('Supabase client not available');
+    final userId = client.auth.currentUser?.id;
+    if (userId == null) throw Exception('User not authenticated');
+
+    await client.from('social_stories').insert({
+      'user_id': userId,
+      'media_url': mediaUrl,
+      'caption': caption,
+      'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
+    });
+
+    // Invalider le cache pour recharger les stories
+    _cache = null;
   }
 
   @override
   Future<SocialPost> createPost(SocialComposerInput input) async {
-    final currentUser = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+    final client = SupabaseClientProvider.clientOrNull;
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUser = client.auth.currentUser;
+    if (currentUser == null) throw Exception('User not authenticated');
+
     final author = SocialAuthor(
-      id: currentUser?.id ?? 'local-user',
-      name: currentUser?.userMetadata?['display_name']?.toString() ?? 'Vous',
-      role: currentUser?.userMetadata?['headline']?.toString() ?? 'Membre THIX CENTRAL',
+      id: currentUser.id,
+      name: currentUser.userMetadata?['display_name']?.toString() ?? 'Utilisateur',
+      role: currentUser.userMetadata?['headline']?.toString() ?? 'Membre',
       isVerified: true,
-      mutualConnections: 24,
     );
     final now = DateTime.now();
     final id = 'post-${now.microsecondsSinceEpoch}';
@@ -103,86 +218,111 @@ class ThixSocialRepository implements SocialRepository {
       isPinned: false,
     );
     final post = _feedService.applyComposerData(base: base, input: input);
+
+    // Insérer dans Supabase
+    final json = post.toJson();
+    // On retire les champs calculés (likeCount, commentCount, etc.) car ils seront mis à jour par triggers
+    json.remove('like_count');
+    json.remove('comment_count');
+    json.remove('share_count');
+    json.remove('view_count');
+    json.remove('is_pinned');
+    json.remove('is_liked');
+    json.remove('is_bookmarked');
+    json.remove('comments');
+    json['user_id'] = currentUser.id;
+    await client.from('social_posts').insert(json);
+
+    // Mettre à jour le cache
     final updatedFeed = [post, ..._snapshot.feed];
     _cache = _snapshot.copyWith(feed: updatedFeed);
-    final client = SupabaseClientProvider.clientOrNull;
-    if (client != null) {
-      try {
-        await client.from('social_posts').insert(post.toJson());
-      } catch (error) {
-        debugPrint('social create fallback: $error');
-      }
-    }
     return post;
   }
 
   @override
   Future<SocialPost> toggleLike(String postId) async {
-    final target = _snapshot.feed.firstWhere((post) => post.id == postId);
     final client = SupabaseClientProvider.clientOrNull;
-    final currentUserId = client?.auth.currentUser?.id;
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) throw Exception('User not authenticated');
 
-    final optimistic = target.copyWith(
-      isLiked: !target.isLiked,
-      likeCount: target.isLiked ? max(0, target.likeCount - 1) : target.likeCount + 1,
-    );
+    final target = _snapshot.feed.firstWhere((post) => post.id == postId);
+    final isLiked = !target.isLiked;
+    final newLikeCount = isLiked ? target.likeCount + 1 : target.likeCount - 1;
+
+    // Optimistic update
+    final optimistic = target.copyWith(isLiked: isLiked, likeCount: newLikeCount);
     _replacePost(optimistic);
 
-    if (client == null || currentUserId == null) return optimistic;
     try {
-      if (optimistic.isLiked) {
+      if (isLiked) {
         await client.from('social_post_likes').insert({'post_id': postId, 'user_id': currentUserId});
       } else {
         await client.from('social_post_likes').delete().eq('post_id', postId).eq('user_id', currentUserId);
       }
+      // Récupérer le post mis à jour depuis Supabase
       final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
-      final refreshedJson = _asJsonMap(refreshed);
-      if (refreshedJson != null) {
-        final updated = SocialPost.fromJson(refreshedJson).copyWith(isLiked: optimistic.isLiked);
+      if (refreshed != null) {
+        final updated = SocialPost.fromJson(refreshed).copyWith(isLiked: isLiked);
         _replacePost(updated);
         return updated;
       }
-    } catch (error) {
-      debugPrint('social like failed: $error');
+    } catch (e) {
+      // En cas d'erreur, annuler l'optimistic update
+      final revert = target.copyWith(isLiked: !isLiked, likeCount: target.likeCount);
+      _replacePost(revert);
+      rethrow;
     }
     return optimistic;
   }
 
   @override
   Future<SocialPost> toggleBookmark(String postId) async {
-    final target = _snapshot.feed.firstWhere((post) => post.id == postId);
     final client = SupabaseClientProvider.clientOrNull;
-    final currentUserId = client?.auth.currentUser?.id;
-    final optimistic = target.copyWith(isBookmarked: !target.isBookmarked);
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) throw Exception('User not authenticated');
+
+    final target = _snapshot.feed.firstWhere((post) => post.id == postId);
+    final isBookmarked = !target.isBookmarked;
+    final optimistic = target.copyWith(isBookmarked: isBookmarked);
     _replacePost(optimistic);
 
-    if (client == null || currentUserId == null) return optimistic;
     try {
-      if (optimistic.isBookmarked) {
+      if (isBookmarked) {
         await client.from('social_post_bookmarks').insert({'post_id': postId, 'user_id': currentUserId});
       } else {
         await client.from('social_post_bookmarks').delete().eq('post_id', postId).eq('user_id', currentUserId);
       }
-    } catch (error) {
-      debugPrint('social bookmark failed: $error');
+    } catch (e) {
+      final revert = target.copyWith(isBookmarked: !isBookmarked);
+      _replacePost(revert);
+      rethrow;
     }
     return optimistic;
   }
 
   @override
   Future<SocialPost> addComment(String postId, String text) async {
+    final client = SupabaseClientProvider.clientOrNull;
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUser = client.auth.currentUser;
+    if (currentUser == null) throw Exception('User not authenticated');
+
     final target = _snapshot.feed.firstWhere((post) => post.id == postId);
     final now = DateTime.now();
-    final client = SupabaseClientProvider.clientOrNull;
-    final currentUser = client?.auth.currentUser;
     final author = SocialAuthor(
-      id: currentUser?.id ?? 'local-user',
-      name: currentUser?.userMetadata?['display_name']?.toString() ?? 'Vous',
-      role: currentUser?.userMetadata?['headline']?.toString() ?? 'Membre THIX CENTRAL',
+      id: currentUser.id,
+      name: currentUser.userMetadata?['display_name']?.toString() ?? 'Utilisateur',
+      role: currentUser.userMetadata?['headline']?.toString() ?? 'Membre',
       isVerified: true,
-      mutualConnections: 0,
     );
-    final comment = SocialComment(id: 'comment-${now.microsecondsSinceEpoch}', author: author, text: text.trim(), createdAt: now);
+    final comment = SocialComment(
+      id: 'comment-${now.microsecondsSinceEpoch}',
+      author: author,
+      text: text.trim(),
+      createdAt: now,
+    );
 
     final updated = target.copyWith(
       comments: [...target.comments, comment],
@@ -190,30 +330,34 @@ class ThixSocialRepository implements SocialRepository {
     );
     _replacePost(updated);
 
-    if (client != null && currentUser != null) {
-      try {
-        await client.from('social_post_comments').insert({
-          'post_id': postId,
-          'author_id': author.id,
-          'author_name': author.name,
-          'author_role': author.role,
-          'author_avatar_url': author.avatarUrl,
-          'text': comment.text,
-        });
-        final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
-        final refreshedJson = _asJsonMap(refreshed);
-        if (refreshedJson != null) {
-          final next = SocialPost.fromJson(refreshedJson).copyWith(
-            isLiked: updated.isLiked,
-            isBookmarked: updated.isBookmarked,
-            comments: updated.comments,
-          );
-          _replacePost(next);
-          return next;
-        }
-      } catch (error) {
-        debugPrint('social comment failed: $error');
+    try {
+      await client.from('social_post_comments').insert({
+        'post_id': postId,
+        'author_id': author.id,
+        'author_name': author.name,
+        'author_role': author.role,
+        'author_avatar_url': author.avatarUrl,
+        'text': comment.text,
+      });
+      // Rafraîchir le post pour mettre à jour commentCount
+      final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
+      if (refreshed != null) {
+        final next = SocialPost.fromJson(refreshed).copyWith(
+          isLiked: updated.isLiked,
+          isBookmarked: updated.isBookmarked,
+          comments: updated.comments,
+        );
+        _replacePost(next);
+        return next;
       }
+    } catch (e) {
+      // Annuler l'optimistic update
+      final revert = target.copyWith(
+        comments: target.comments,
+        commentCount: target.commentCount,
+      );
+      _replacePost(revert);
+      rethrow;
     }
     return updated;
   }
@@ -234,268 +378,91 @@ class ThixSocialRepository implements SocialRepository {
 
   @override
   Future<List<SocialConnectionSuggestion>> toggleConnection(String suggestionId) async {
-    // Local-first behaviour (and used as fallback if Supabase isn't ready).
-    final updated = _snapshot.suggestions.map((suggestion) {
-      if (suggestion.id != suggestionId) return suggestion;
-      if (suggestion.isBlocked) return suggestion.copyWith(isBlocked: false);
-      if (suggestion.isConnected) return suggestion.copyWith(isConnected: false);
-      if (suggestion.isRequested) {
-        return suggestion.copyWith(isRequested: false, isConnected: true);
-      }
-      return suggestion.copyWith(isRequested: true);
-    }).toList();
-    _cache = _snapshot.copyWith(suggestions: updated);
-
     final client = SupabaseClientProvider.clientOrNull;
-    final currentUserId = client?.auth.currentUser?.id;
-    if (client != null && currentUserId != null) {
-      try {
-        final target = updated.firstWhere((item) => item.id == suggestionId);
-        final status = target.isConnected
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) throw Exception('User not authenticated');
+
+    // Trouver la suggestion dans le cache
+    final suggestionIndex = _snapshot.suggestions.indexWhere((s) => s.id == suggestionId);
+    if (suggestionIndex == -1) throw Exception('Suggestion not found');
+
+    final current = _snapshot.suggestions[suggestionIndex];
+    final newStatus = current.isConnected
+        ? 'none'
+        : current.isRequested
             ? 'accepted'
-            : target.isRequested
-                ? 'requested'
-                : 'none';
-        if (status == 'none') {
-          await client.from('social_connections').delete().eq('requester_id', currentUserId).eq('addressee_id', suggestionId);
-        } else {
-          await client.from('social_connections').upsert({'requester_id': currentUserId, 'addressee_id': suggestionId, 'status': status});
-        }
-      } catch (error) {
-        debugPrint('social connection sync failed: $error');
+            : 'requested';
+
+    // Optimistic update
+    final updatedSuggestion = current.copyWith(
+      isConnected: newStatus == 'accepted' || newStatus == 'none' && current.isConnected,
+      isRequested: newStatus == 'requested' || newStatus == 'accepted' && current.isRequested,
+      isBlocked: false,
+    );
+    final updatedList = List<SocialConnectionSuggestion>.from(_snapshot.suggestions)
+      ..[suggestionIndex] = updatedSuggestion;
+    _cache = _snapshot.copyWith(suggestions: updatedList);
+
+    try {
+      if (newStatus == 'none') {
+        await client.from('social_connections')
+            .delete()
+            .eq('requester_id', currentUserId)
+            .eq('addressee_id', suggestionId);
+      } else {
+        await client.from('social_connections').upsert({
+          'requester_id': currentUserId,
+          'addressee_id': suggestionId,
+          'status': newStatus,
+        });
       }
+    } catch (e) {
+      // Revert
+      final revertList = List<SocialConnectionSuggestion>.from(_snapshot.suggestions)
+        ..[suggestionIndex] = current;
+      _cache = _snapshot.copyWith(suggestions: revertList);
+      rethrow;
     }
-    return updated;
+    return _snapshot.suggestions;
   }
 
   @override
   Future<List<SocialNotificationItem>> markNotificationAsRead(String notificationId) async {
-    final updated = _snapshot.notifications
-        .map((notification) => notification.id == notificationId ? notification.copyWith(isUnread: false) : notification)
-        .toList();
-    _cache = _snapshot.copyWith(notifications: updated);
-    return updated;
+    final client = SupabaseClientProvider.clientOrNull;
+    if (client == null) throw Exception('Supabase client not available');
+    final currentUserId = client.auth.currentUser?.id;
+    if (currentUserId == null) throw Exception('User not authenticated');
+
+    // Optimistic update
+    final updatedNotifications = _snapshot.notifications.map((n) {
+      return n.id == notificationId ? n.copyWith(isUnread: false) : n;
+    }).toList();
+    _cache = _snapshot.copyWith(notifications: updatedNotifications);
+
+    try {
+      await client.from('social_notifications')
+          .update({'is_unread': false})
+          .eq('id', notificationId)
+          .eq('user_id', currentUserId);
+    } catch (e) {
+      // Revert
+      final revertList = _snapshot.notifications.map((n) {
+        return n.id == notificationId ? n.copyWith(isUnread: true) : n;
+      }).toList();
+      _cache = _snapshot.copyWith(notifications: revertList);
+      rethrow;
+    }
+    return _snapshot.notifications;
   }
 
+  // Helper pour remplacer un post dans le cache
   void _replacePost(SocialPost post) {
-    final updatedFeed = _snapshot.feed.map((item) => item.id == post.id ? post : item).toList();
+    final updatedFeed = _snapshot.feed.map((p) => p.id == post.id ? post : p).toList();
     _cache = _snapshot.copyWith(feed: updatedFeed);
   }
 
-  static SocialModuleSnapshot _buildSeedSnapshot() {
-    final now = DateTime.now();
-    final aicha = const SocialAuthor(
-      id: 'aicha',
-      name: 'Aïcha Diop',
-      role: 'Product Designer · TechNova',
-      isVerified: true,
-      mutualConnections: 18,
-    );
-    final mamadou = const SocialAuthor(
-      id: 'mamadou',
-      name: 'Mamadou Camara',
-      role: 'Growth Lead · StartupLab',
-      mutualConnections: 12,
-    );
-    final nathan = const SocialAuthor(
-      id: 'nathan',
-      name: 'Nathan Kouamé',
-      role: 'Founder · Thix Builders Community',
-      isVerified: true,
-      mutualConnections: 31,
-    );
-
-    final feed = <SocialPost>[
-      SocialPost(
-        id: 'seed-1',
-        author: aicha,
-        content: 'Très fière de partager notre nouveau projet UI/UX pour une solution SaaS. Merci à @nathan pour la confiance. #design #product',
-        kind: SocialPostKind.image,
-        createdAt: now.subtract(const Duration(hours: 3)),
-        mediaUrls: const ['https://storage.thix.example/mock/design-cover.png'],
-        hashtags: const ['design', 'product'],
-        mentions: const ['nathan'],
-        likeCount: 128,
-        commentCount: 33,
-        shareCount: 11,
-        viewCount: 740,
-        isPinned: true,
-        communityName: 'Design Leaders',
-        comments: [
-          SocialComment(
-            id: 'comment-a1',
-            author: mamadou,
-            text: 'Super clair, bravo pour le teasing 👏',
-            createdAt: now.subtract(const Duration(hours: 2, minutes: 10)),
-          ),
-        ],
-      ),
-      SocialPost(
-        id: 'seed-2',
-        author: mamadou,
-        content: 'Webinar gratuit jeudi : 5 actions pour améliorer vos KPI produit. Inscription ouverte ! #growth #analytics',
-        kind: SocialPostKind.poll,
-        createdAt: now.subtract(const Duration(hours: 5)),
-        hashtags: const ['growth', 'analytics'],
-        likeCount: 92,
-        commentCount: 18,
-        shareCount: 25,
-        viewCount: 640,
-        poll: SocialPoll(
-          question: 'Quel sujet prioriser pour le webinar ?',
-          options: const [
-            SocialPollOption(id: 'poll-1', label: 'Activation', votes: 34, isSelected: true),
-            SocialPollOption(id: 'poll-2', label: 'Rétention', votes: 28),
-            SocialPollOption(id: 'poll-3', label: 'Pricing', votes: 14),
-          ],
-          expiresAt: now.add(const Duration(days: 2)),
-          hasVoted: true,
-        ),
-      ),
-      SocialPost(
-        id: 'seed-3',
-        author: nathan,
-        content: 'Challenge ouvert : montrez votre meilleure landing page no-code et remportez une session mentorat + 250 000 XOF. #challenge #nocode',
-        kind: SocialPostKind.challenge,
-        createdAt: now.subtract(const Duration(hours: 9)),
-        hashtags: const ['challenge', 'nocode'],
-        likeCount: 74,
-        commentCount: 12,
-        shareCount: 29,
-        viewCount: 1220,
-        challenge: SocialChallenge(
-          title: 'No-Code Launch Sprint',
-          prize: '250 000 XOF + mentorat',
-          participants: 38,
-          leaderboardPreview: const ['Studio Sahel', 'Flow Dakar', 'UI Tribe'],
-          deadline: now.add(const Duration(days: 5)),
-        ),
-      ),
-      SocialPost(
-        id: 'seed-4',
-        author: aicha,
-        content: 'Repost de la check-list product ops de @mamadou — ultra utile pour structurer les rituels d’équipe.',
-        kind: SocialPostKind.repost,
-        createdAt: now.subtract(const Duration(hours: 18)),
-        quote: 'À diffuser à tous les PMs 👇',
-        repostOfPostId: 'seed-2',
-        repostAuthorName: mamadou.name,
-        likeCount: 36,
-        commentCount: 6,
-        shareCount: 7,
-        viewCount: 241,
-      ),
-    ];
-
-    return SocialModuleSnapshot(
-      feed: feed,
-      stories: [
-        SocialStory(
-          id: 'story-me',
-          author: const SocialAuthor(id: 'me', name: 'Ma Story', role: 'Votre réseau'),
-          createdAt: now.subtract(const Duration(hours: 1)),
-          expiresAt: now.add(const Duration(hours: 23)),
-          viewCount: 0,
-        ),
-        SocialStory(
-          id: 'story-1',
-          author: nathan,
-          createdAt: now.subtract(const Duration(hours: 4)),
-          expiresAt: now.add(const Duration(hours: 20)),
-          isViewed: false,
-          viewCount: 138,
-        ),
-        SocialStory(
-          id: 'story-2',
-          author: mamadou,
-          createdAt: now.subtract(const Duration(hours: 7)),
-          expiresAt: now.add(const Duration(hours: 17)),
-          isVideo: true,
-          isViewed: true,
-          viewCount: 92,
-        ),
-      ],
-      highlights: const [
-        SocialHighlight(id: 'highlight-1', title: 'Lancements', storyCount: 6),
-        SocialHighlight(id: 'highlight-2', title: 'Meetups', storyCount: 9),
-      ],
-      communities: const [
-        SocialCommunity(
-          id: 'community-1',
-          name: 'Design Leaders',
-          description: 'Partage UX, audits et mentorat entre designers francophones.',
-          memberCount: 1240,
-          role: 'admin',
-          isJoined: true,
-        ),
-        SocialCommunity(
-          id: 'community-2',
-          name: 'Growth Club',
-          description: 'Expériences acquisition, CRM et activation produit.',
-          memberCount: 860,
-          isPrivate: true,
-          isJoined: true,
-        ),
-        SocialCommunity(
-          id: 'community-3',
-          name: 'No-Code Africa',
-          description: 'Tutoriels, feedback et challenges builders.',
-          memberCount: 2320,
-        ),
-      ],
-      suggestions: const [
-        SocialConnectionSuggestion(id: 'suggestion-1', name: 'Fatou Sy', role: 'Data Analyst · Wave', mutualConnections: 14),
-        SocialConnectionSuggestion(id: 'suggestion-2', name: 'Nora Bamba', role: 'Community Builder · Seedstars', mutualConnections: 8, isRequested: true),
-        SocialConnectionSuggestion(id: 'suggestion-3', name: 'Jean Koné', role: 'CTO · Flow Dakar', mutualConnections: 19, isConnected: true),
-      ],
-      notifications: [
-        SocialNotificationItem(
-          id: 'notif-1',
-          title: 'Nouveau like',
-          description: 'Aïcha a aimé votre post sur #product.',
-          createdAt: now.subtract(const Duration(minutes: 16)),
-          type: 'like',
-        ),
-        SocialNotificationItem(
-          id: 'notif-2',
-          title: 'Commentaire reçu',
-          description: 'Mamadou a commenté votre reel.',
-          createdAt: now.subtract(const Duration(hours: 2)),
-          type: 'comment',
-        ),
-        SocialNotificationItem(
-          id: 'notif-3',
-          title: 'Nouvelle connexion',
-          description: 'Jean a accepté votre invitation.',
-          createdAt: now.subtract(const Duration(hours: 5)),
-          isUnread: false,
-          type: 'connection',
-        ),
-      ],
-      conversations: [
-        SocialConversation(
-          id: 'conv-1',
-          peerName: 'Nora Bamba',
-          lastMessage: 'Je t’envoie la présentation + les pièces jointes tout de suite.',
-          updatedAt: now.subtract(const Duration(minutes: 8)),
-          unreadCount: 2,
-          attachmentCount: 1,
-          isSeen: false,
-        ),
-        SocialConversation(
-          id: 'conv-2',
-          peerName: 'Design Leaders',
-          lastMessage: 'Le brief du prochain challenge est publié.',
-          updatedAt: now.subtract(const Duration(hours: 1, minutes: 12)),
-          attachmentCount: 0,
-        ),
-      ],
-      trendingHashtags: const ['#product', '#design', '#growth', '#nocode', '#communauté'],
-      analytics: const SocialAnalyticsSnapshot(profileViews: 1248, contentViews: 8921, likes: 527, comments: 143),
-      moderation: const SocialModerationSnapshot(hiddenPosts: 3, reportedPosts: 1, blockedUsers: 2, rlsReady: true),
-    );
-  }
-
+  // Helper pour convertir les données JSON (inchangé)
   static Map<String, dynamic>? _asJsonMap(dynamic value) {
     if (value == null) return null;
     if (value is Map<String, dynamic>) return value;
