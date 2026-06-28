@@ -124,23 +124,29 @@ class ThixRoleController extends ChangeNotifier {
   ThixRole _role = ThixRole.patient;
   ThixRole? _verifiedRole;
   bool _manualSelection = false;
+  List<ThixRole> _availableRoles = _defaultRoleOrder;
 
   ThixRole get role => _role;
   ThixRole? get verifiedRole => _verifiedRole;
   bool get hasManualSelection => _manualSelection;
-  List<ThixRole> get availableRoles => _defaultRoleOrder;
+  List<ThixRole> get availableRoles => _availableRoles;
 
   /// Syncs the UI role from trusted session metadata only.
   ///
   /// This controller is presentation-only and must not infer privileged access
   /// from spoofable values like email domains.
-  void syncFromSession({Map<String, dynamic>? appMetadata, Map<String, dynamic>? userMetadata}) {
-    final resolved = _parseRoleFromMetadata(appMetadata) ?? _parseRoleFromMetadata(userMetadata);
-    if (resolved == _verifiedRole && (_manualSelection || resolved == _role || resolved == null)) {
+  void syncFromSession({Map<String, dynamic>? appMetadata, Map<String, dynamic>? userMetadata, String? email}) {
+    final resolved = _parseRoleFromMetadata(appMetadata) ?? _parseRoleFromMetadata(userMetadata) ?? _roleFromEmail(email);
+    final inferredRoles = _inferRoles(email: email, verified: _parseRoleFromMetadata(appMetadata) ?? _parseRoleFromMetadata(userMetadata));
+    final updatedRoles = inferredRoles.isEmpty ? _defaultRoleOrder : inferredRoles;
+    final availableChanged = !_listsEqual(_availableRoles, updatedRoles);
+
+    if (resolved == _verifiedRole && (_manualSelection || resolved == _role || resolved == null) && !availableChanged) {
       return;
     }
 
-    _verifiedRole = resolved;
+    _verifiedRole = _parseRoleFromMetadata(appMetadata) ?? _parseRoleFromMetadata(userMetadata);
+    _availableRoles = updatedRoles;
     if (!_manualSelection && resolved != null) {
       _role = resolved;
     }
@@ -168,5 +174,32 @@ class ThixRoleController extends ChangeNotifier {
     final raw = (metadata['thix_role'] ?? metadata['role'])?.toString().trim().toLowerCase();
     if (raw == null || raw.isEmpty) return null;
     return _allowedClaims[raw];
+  }
+
+  List<ThixRole> _inferRoles({String? email, ThixRole? verified}) {
+    final roles = <ThixRole>{};
+    if (verified != null) roles.add(verified);
+    final emailRole = _roleFromEmail(email);
+    if (emailRole != null) roles.add(emailRole);
+    roles.add(ThixRole.patient);
+    return roles.toList()
+      ..sort((a, b) => _defaultRoleOrder.indexOf(a).compareTo(_defaultRoleOrder.indexOf(b)));
+  }
+
+  ThixRole? _roleFromEmail(String? email) {
+    if (email == null || !email.contains('@')) return null;
+    final domain = email.split('@').last.toLowerCase();
+    if (domain.endsWith('doctor.com')) return ThixRole.doctor;
+    if (domain.endsWith('pharmacy.com')) return ThixRole.pharmacy;
+    return ThixRole.patient;
+  }
+
+  bool _listsEqual(List<ThixRole> a, List<ThixRole> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 }

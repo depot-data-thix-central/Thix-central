@@ -1,8 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:thix_central/auth/auth_manager.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
 import 'package:thix_central/health/thix_ui_feedback.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
+import 'package:thix_central/nav.dart';
+import 'package:thix_central/pages/health/health_role_workspaces.dart';
 import 'package:thix_central/theme.dart';
 
 class ThixHealthDashboardPage extends StatefulWidget {
@@ -14,14 +19,101 @@ class ThixHealthDashboardPage extends StatefulWidget {
 
 class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
   final _roleController = ThixRoleController.instance;
+  final _authManager = SupabaseAuthManager();
+  final _permissionKeys = ['notifications', 'location', 'camera', 'storage'];
+  Map<String, bool> _permissions = {'notifications': false, 'location': false, 'camera': false, 'storage': false};
+  bool _onboardingShown = false;
 
   @override
   void initState() {
     super.initState();
+    _loadOnboarding();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
-      _roleController.syncFromSession(appMetadata: user?.appMetadata, userMetadata: user?.userMetadata);
+      _roleController.syncFromSession(appMetadata: user?.appMetadata, userMetadata: user?.userMetadata, email: user?.email);
+      if (!_onboardingShown) {
+        _showOnboarding();
+      }
     });
+  }
+
+  Future<void> _loadOnboarding() async {
+    final prefs = await SharedPreferences.getInstance();
+    final saved = <String, bool>{};
+    for (final key in _permissionKeys) {
+      saved[key] = prefs.getBool('health_perm_$key') ?? false;
+    }
+    final seen = prefs.getBool('health_onboarding_seen') ?? false;
+    if (!mounted) return;
+    setState(() {
+      _permissions = saved;
+      _onboardingShown = seen;
+    });
+  }
+
+  Future<void> _showOnboarding({bool force = false}) async {
+    if (!mounted || (_onboardingShown && !force)) return;
+    setState(() => _onboardingShown = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('health_onboarding_seen', true);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _OnboardingSheet(),
+    );
+  }
+
+  Future<void> _togglePermission(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('health_perm_$key', value);
+    if (!mounted) return;
+    setState(() {
+      _permissions = {..._permissions, key: value};
+    });
+  }
+
+  Future<void> _resetPassword() async {
+    final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+    final initialEmail = user?.email ?? '';
+    final controller = TextEditingController(text: initialEmail);
+    final confirmed = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Réinitialiser le mot de passe'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Email', hintText: 'prenom@exemple.com'),
+          keyboardType: TextInputType.emailAddress,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.of(context).pop(controller.text.trim()), child: const Text('Envoyer')),
+        ],
+      ),
+    );
+    if (confirmed == null || confirmed.isEmpty) return;
+    try {
+      await _authManager.resetPassword(email: confirmed, context: context);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lien envoyé à $confirmed')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
+  }
+
+  Future<void> _signOut() async {
+    try {
+      await _authManager.signOut();
+      if (!mounted) return;
+      _roleController.selectRole(ThixRole.patient, manual: false);
+      context.go(AppRoutes.login);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur de déconnexion: $e')));
+    }
   }
 
   @override
@@ -47,6 +139,26 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
                         _DashboardTopBar(greetingName: greetingName, role: role),
                         const SizedBox(height: 18),
                         _RoleSwitcher(controller: _roleController),
+                        const SizedBox(height: 14),
+                        _AccessBanner(
+                          role: role,
+                          email: email,
+                          permissions: _permissions,
+                          onTogglePermission: _togglePermission,
+                          onResetPassword: _resetPassword,
+                          onSignOut: _signOut,
+                          onBack: () {
+                            if (context.canPop()) {
+                              context.pop();
+                            } else {
+                              context.go(AppRoutes.home);
+                            }
+                          },
+                          onShowOnboarding: () => _showOnboarding(force: true),
+                          hasManualSelection: _roleController.hasManualSelection,
+                          verifiedRole: _roleController.verifiedRole,
+                          detectedRoles: _roleController.availableRoles,
+                        ),
                         const SizedBox(height: 16),
                         _HeroBanner(role: role, greetingName: greetingName),
                         const SizedBox(height: 18),
@@ -61,6 +173,11 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
                         _ArticlesOrAlerts(role: role),
                         const SizedBox(height: 20),
                         _BottomAction(role: role),
+                        const SizedBox(height: 20),
+                        HealthRoleWorkspace(
+                          role: role,
+                          permissions: _permissions,
+                        ),
                         const SizedBox(height: 120),
                       ],
                     ),
@@ -932,6 +1049,271 @@ class _AvatarBadge extends StatelessWidget {
   }
 }
 
+class _AccessBanner extends StatelessWidget {
+  const _AccessBanner({
+    required this.role,
+    required this.email,
+    required this.permissions,
+    required this.onTogglePermission,
+    required this.onResetPassword,
+    required this.onSignOut,
+    required this.onBack,
+    required this.onShowOnboarding,
+    required this.hasManualSelection,
+    required this.verifiedRole,
+    required this.detectedRoles,
+  });
+
+  final ThixRole role;
+  final String? email;
+  final Map<String, bool> permissions;
+  final void Function(String key, bool value) onTogglePermission;
+  final VoidCallback onResetPassword;
+  final VoidCallback onSignOut;
+  final VoidCallback onBack;
+  final VoidCallback onShowOnboarding;
+  final bool hasManualSelection;
+  final ThixRole? verifiedRole;
+  final List<ThixRole> detectedRoles;
+
+  @override
+  Widget build(BuildContext context) {
+    final detection = _detectionLabel(email, detectedRoles);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Accès & rôles', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+                    const SizedBox(height: 4),
+                    Text(detection, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              IconButton(onPressed: onBack, icon: const Icon(Icons.arrow_back_rounded, color: AppColors.darkNavy)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildChip(context, label: 'Actif: ${role.label}', icon: role.icon, color: role.accent),
+              _buildChip(context, label: 'Vérifié: ${verifiedRole?.label ?? 'Non fourni'}', icon: Icons.verified_user_rounded, color: AppColors.primaryBlue),
+              if (hasManualSelection) _buildChip(context, label: 'Rôle choisi manuellement', icon: Icons.handshake_rounded, color: Colors.orange),
+              _buildChip(context, label: 'Email: ${email ?? 'Non connecté'}', icon: Icons.email_outlined, color: AppColors.textSecondary),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _PermissionToggle(label: 'Notifications', value: permissions['notifications'] ?? false, onChanged: (v) => onTogglePermission('notifications', v), icon: Icons.notifications_active_rounded)),
+              Expanded(child: _PermissionToggle(label: 'Localisation', value: permissions['location'] ?? false, onChanged: (v) => onTogglePermission('location', v), icon: Icons.location_on_rounded)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: _PermissionToggle(label: 'Caméra', value: permissions['camera'] ?? false, onChanged: (v) => onTogglePermission('camera', v), icon: Icons.photo_camera_rounded)),
+              Expanded(child: _PermissionToggle(label: 'Stockage', value: permissions['storage'] ?? false, onChanged: (v) => onTogglePermission('storage', v), icon: Icons.folder_rounded)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onResetPassword,
+                  icon: const Icon(Icons.lock_reset_rounded),
+                  label: const Text('Réinitialiser le mot de passe'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              IconButton(onPressed: onShowOnboarding, icon: const Icon(Icons.slideshow_rounded, color: AppColors.primaryBlue)),
+              const SizedBox(width: 4),
+              IconButton(onPressed: onSignOut, icon: const Icon(Icons.logout_rounded, color: Colors.red)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChip(BuildContext context, {required String label, required IconData icon, required Color color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(999)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 16),
+          const SizedBox(width: 6),
+          Text(label, style: context.textStyles.labelSmall?.copyWith(color: AppColors.darkNavy, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+
+  String _detectionLabel(String? email, List<ThixRole> roles) {
+    if (email == null) return 'Aucun email détecté. Sélectionnez un rôle manuellement.';
+    final domain = email.split('@').last;
+    final base = 'Email: $email · Domaine $domain';
+    if (domain.endsWith('doctor.com')) {
+      return '$base → rôle Médecin prioritaire';
+    }
+    if (domain.endsWith('pharmacy.com')) {
+      return '$base → rôle Pharmacie prioritaire';
+    }
+    final primary = roles.isNotEmpty ? roles.first.label : 'Patient';
+    return '$base → rôle $primary';
+  }
+}
+
+class _PermissionToggle extends StatelessWidget {
+  const _PermissionToggle({required this.label, required this.value, required this.onChanged, required this.icon});
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.lightGrayBackground,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.cardBorder),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.cardBorder)),
+            child: Icon(icon, color: AppColors.primaryBlue),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Text(label, style: context.textStyles.labelLarge?.copyWith(fontWeight: FontWeight.w800))),
+          Switch(value: value, onChanged: onChanged),
+        ],
+      ),
+    );
+  }
+}
+
+class _OnboardingSheet extends StatefulWidget {
+  const _OnboardingSheet();
+
+  @override
+  State<_OnboardingSheet> createState() => _OnboardingSheetState();
+}
+
+class _OnboardingSheetState extends State<_OnboardingSheet> {
+  final _controller = PageController();
+  int _index = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    final slides = _onboardingSlides;
+    return DraggableScrollableSheet(
+      expand: false,
+      minChildSize: 0.45,
+      initialChildSize: 0.55,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+          ),
+          padding: const EdgeInsets.all(18),
+          child: Column(
+            children: [
+              Container(width: 40, height: 4, decoration: BoxDecoration(color: AppColors.cardBorder, borderRadius: BorderRadius.circular(12))),
+              const SizedBox(height: 14),
+              Expanded(
+                child: PageView.builder(
+                  controller: _controller,
+                  onPageChanged: (i) => setState(() => _index = i),
+                  itemCount: slides.length,
+                  itemBuilder: (context, index) => _OnboardingSlide(item: slides[index]),
+                ),
+              ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(slides.length, (i) => Container(
+                      width: 10,
+                      height: 10,
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      decoration: BoxDecoration(color: i == _index ? AppColors.primaryBlue : AppColors.cardBorder, shape: BoxShape.circle),
+                    )),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  OutlinedButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Plus tard')),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_forward_rounded),
+                      label: Text(_index == slides.length - 1 ? 'Commencer' : 'Suivant'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _OnboardingSlide extends StatelessWidget {
+  const _OnboardingSlide({required this.item});
+
+  final _OnboardingItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(gradient: item.gradient, borderRadius: BorderRadius.circular(22)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(item.icon, color: Colors.white, size: 32),
+              const SizedBox(height: 12),
+              Text(item.title, style: context.textStyles.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w900, height: 1.2)),
+              const SizedBox(height: 8),
+              Text(item.subtitle, style: context.textStyles.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.92))),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Text(item.bullet, style: context.textStyles.bodyLarge?.copyWith(color: AppColors.darkNavy, height: 1.35)),
+      ],
+    );
+  }
+}
+
 class _ActionItem {
   const _ActionItem({required this.label, required this.icon, required this.color});
 
@@ -987,6 +1369,40 @@ class _ModuleSection {
   final String actionLabel;
   final List<_FeatureItem> items;
 }
+
+class _OnboardingItem {
+  const _OnboardingItem({required this.title, required this.subtitle, required this.bullet, required this.icon, required this.gradient});
+
+  final String title;
+  final String subtitle;
+  final String bullet;
+  final IconData icon;
+  final LinearGradient gradient;
+}
+
+const _onboardingSlides = [
+  _OnboardingItem(
+    title: 'Bienvenue sur THIX Santé',
+    subtitle: 'Un seul espace pour Patient, Médecin et Pharmacie.',
+    bullet: 'Activez vos permissions (notifications, localisation, caméra) pour bénéficier des alertes santé, du scan document et des rappels de traitements.',
+    icon: Icons.favorite_rounded,
+    gradient: LinearGradient(colors: [Color(0xFF1E56E6), Color(0xFF14C7B7)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+  ),
+  _OnboardingItem(
+    title: 'Sécurité & identité',
+    subtitle: 'Rôles détectés automatiquement via le domaine email (doctor.com, pharmacy.com).',
+    bullet: 'Un rôle vérifié reste prioritaire. Vous pouvez basculer manuellement pour tester les parcours, le serveur garde la vérité métier.',
+    icon: Icons.verified_user_rounded,
+    gradient: LinearGradient(colors: [Color(0xFF102A86), Color(0xFF5C7CFF)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+  ),
+  _OnboardingItem(
+    title: 'Urgence & coordination',
+    subtitle: 'Rappels de traitements, RDV, téléconsultation Jitsi et dossier partagé.',
+    bullet: 'En cas d’urgence, utilisez la carte Appel 15 et l’alerte famille. Tous les documents restent partageables via un lien sécurisé.',
+    icon: Icons.phone_in_talk_rounded,
+    gradient: LinearGradient(colors: [Color(0xFFE91E63), Color(0xFFFF7A00)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+  ),
+];
 
 void _showInfo(BuildContext context, String label) => showThixFeatureReadySnackBar(context, label);
 

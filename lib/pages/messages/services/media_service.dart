@@ -168,7 +168,8 @@ class TranslationService {
         },
       );
 
-      return response['translatedText'] as String? ?? content;
+      final data = response.data as Map<String, dynamic>?;
+      return data?['translatedText'] as String? ?? content;
     } catch (e) {
       // Fallback to original content if translation fails
       return content;
@@ -186,7 +187,8 @@ class TranslationService {
         },
       );
 
-      return response['transcription'] as String?;
+      final data = response.data as Map<String, dynamic>?;
+      return data?['transcription'] as String?;
     } catch (e) {
       return null;
     }
@@ -360,7 +362,7 @@ class ArchiveService {
           .from('conversation_participants')
           .select('*, conversations(*)')
           .eq('user_id', userId)
-          .isNotNull('archived_at')
+          .not('archived_at', 'is', null)
           .order('archived_at', ascending: false);
 
       return response as List<Map<String, dynamic>>;

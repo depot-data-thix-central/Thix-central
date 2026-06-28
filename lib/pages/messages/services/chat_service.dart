@@ -123,13 +123,14 @@ class ChatService {
 
   /// Listen to messages in real-time for a conversation
   Stream<List<Message>> messagesStream(String conversationId) {
-    return _client
-        .from('messages')
-        .stream(primaryKey: ['id'])
-        .eq('conversation_id', conversationId)
-        .eq('deleted_at', null)
-        .order('created_at')
-        .map((rows) => rows.map((row) => Message.fromJson(row as Map<String, dynamic>)).toList());
+    final stream = _client.from('messages').stream(primaryKey: ['id']).order('created_at');
+
+    // Filter client-side because SupabaseStreamBuilder in this SDK snapshot
+    // does not expose filter helpers on the stream builder.
+    return stream.map((rows) => rows
+        .map((row) => Message.fromJson(row as Map<String, dynamic>))
+        .where((message) => message.conversationId == conversationId && message.deletedAt == null)
+        .toList());
   }
 
   /// Send a message

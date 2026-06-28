@@ -266,11 +266,14 @@ class ConversationSettingsService {
     required DateTime? mutedUntil,
   }) async {
     try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) throw Exception('User not authenticated');
+
       await _client
           .from('conversation_participants')
           .update({'muted_until': mutedUntil?.toIso8601String()})
           .eq('conversation_id', conversationId)
-          .eq('user_id', _client.auth.currentUser?.id);
+          .eq('user_id', userId);
     } catch (e) {
       rethrow;
     }
