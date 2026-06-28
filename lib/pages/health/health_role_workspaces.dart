@@ -1,20 +1,59 @@
-import 'dart:math';
+// 📁 lib/pages/health/health_role_workspaces.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
 import 'package:thix_central/health/thix_ui_feedback.dart';
 import 'package:thix_central/nav.dart';
 import 'package:thix_central/theme.dart';
+import 'package:jitsi_meet/jitsi_meet.dart';
+import 'package:thix_central/data/models/health/symptom_model.dart';
+import 'package:thix_central/data/models/health/constant_model.dart';
+import 'package:thix_central/data/models/hospital/medication_model.dart';
+import 'package:thix_central/data/models/hospital/appointment_model.dart';
 
-class HealthRoleWorkspace extends StatelessWidget {
+// ============================================================
+// 1. PROVIDERS DE DONNÉES (FutureProvider)
+// ============================================================
+
+final symptomProvider = FutureProvider.family<List<SymptomModel>, String>((ref, patientId) async {
+  final repo = ref.read(symptomRepositoryProvider);
+  return repo.getSymptomsByPatient(patientId);
+});
+
+final constantProvider = FutureProvider.family<List<ConstantModel>, String>((ref, patientId) async {
+  final repo = ref.read(constantRepositoryProvider);
+  return repo.getConstantsByPatient(patientId);
+});
+
+final medicationProvider = FutureProvider.family<List<MedicationModel>, String>((ref, patientId) async {
+  final repo = ref.read(medicationRepositoryProvider);
+  return repo.getActiveMedications(patientId);
+});
+
+final appointmentProvider = FutureProvider.family<List<AppointmentModel>, String>((ref, patientId) async {
+  final repo = ref.read(appointmentRepositoryProvider);
+  return repo.getAppointmentsByPatient(patientId);
+});
+
+final documentsProvider = FutureProvider.family<List<String>, String>((ref, patientId) async {
+  final storage = ref.read(storageServiceProvider);
+  final files = await storage.listFiles(bucketName: 'documents', folder: 'patient_$patientId');
+  return files.map((f) => f['name'] as String).toList();
+});
+
+// ============================================================
+// 2. WIDGET PRINCIPAL
+// ============================================================
+
+class HealthRoleWorkspace extends ConsumerWidget {
   const HealthRoleWorkspace({super.key, required this.role, required this.permissions});
-
   final ThixRole role;
   final Map<String, bool> permissions;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     switch (role) {
       case ThixRole.patient:
         return PatientWorkspace(permissions: permissions);
@@ -26,159 +65,268 @@ class HealthRoleWorkspace extends StatelessWidget {
   }
 }
 
-class PatientWorkspace extends StatefulWidget {
-  const PatientWorkspace({super.key, required this.permissions});
+// ============================================================
+// 3. PATIENT WORKSPACE (CONNECTÉ À SUPABASE)
+// ============================================================
 
+class PatientWorkspace extends ConsumerStatefulWidget {
+  const PatientWorkspace({super.key, required this.permissions});
   final Map<String, bool> permissions;
 
   @override
-  State<PatientWorkspace> createState() => _PatientWorkspaceState();
+  ConsumerState<PatientWorkspace> createState() => _PatientWorkspaceState();
 }
 
-class _PatientWorkspaceState extends State<PatientWorkspace> {
-  final List<PatientSymptom> _symptoms = [
-    PatientSymptom(name: 'Migraine', intensity: 3, notes: 'Repos + hydratation'),
-    PatientSymptom(name: 'Tension élevée', intensity: 4, notes: '145/92 mmHg'),
-  ];
-  final List<PatientVital> _vitals = [
-    PatientVital(type: VitalType.tension, primary: 128, secondary: 82),
-    PatientVital(type: VitalType.glycemia, primary: 1.12),
-    PatientVital(type: VitalType.weight, primary: 74.5),
-  ];
-  final List<PatientTreatment> _treatments = [
-    PatientTreatment(name: 'Amoxicilline', dosage: '500 mg', schedule: '08:00 · 20:00', alerts: true),
-    PatientTreatment(name: 'Vitamine D', dosage: '1 gélule', schedule: 'Chaque dimanche', alerts: false),
-  ];
-  final List<PatientAppointment> _appointments = [
-    PatientAppointment(kind: 'Consultation', doctor: 'Dr. Sarr', reason: 'Suivi tension', status: 'À venir'),
-    PatientAppointment(kind: 'Téléconsultation', doctor: 'Dr. Nadia', reason: 'Résultats analyses', status: 'Aujourd’hui'),
-  ];
-  final List<PatientDocument> _documents = [
-    PatientDocument(title: 'OR-2024-118', type: 'Ordonnance'),
-    PatientDocument(title: 'Bilan sanguin', type: 'Analyse'),
-  ];
+class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
   bool _alertSent = false;
-
-  double get _healthScore {
-    final penalty = _symptoms.fold<double>(0, (sum, s) => sum + s.intensity * 1.5);
-    final gain = _treatments.where((t) => t.alerts).length * 4;
-    return (96 - penalty + gain).clamp(40, 100);
-  }
 
   @override
   Widget build(BuildContext context) {
+    final patientId = SupabaseClientProvider.clientOrNull?.auth.currentUser?.id ?? '';
+    if (patientId.isEmpty) return const SizedBox.shrink();
+
+    final symptomsAsync = ref.watch(symptomProvider(patientId));
+    final constantsAsync = ref.watch(constantProvider(patientId));
+    final medicationsAsync = ref.watch(medicationProvider(patientId));
+    final appointmentsAsync = ref.watch(appointmentProvider(patientId));
+    final documentsAsync = ref.watch(documentsProvider(patientId));
+
+    // Score de santé (via Edge Function)
+    final scoreAsync = ref.watch(healthScoreProvider(patientId));
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _ScoreCard(score: _healthScore, permissions: widget.permissions),
+        // Score de santé
+        scoreAsync.when(
+          data: (score) => _HealthScoreCard(score: score, permissions: widget.permissions),
+          loading: () => _HealthScoreCard(score: 0, permissions: widget.permissions, loading: true),
+          error: (_, __) => _HealthScoreCard(score: 0, permissions: widget.permissions, error: true),
+        ),
         const SizedBox(height: 14),
-        _QuickServices(onAddSymptom: _openSymptomForm, onAddAppointment: _openAppointmentForm),
+        _QuickServices(
+          onAddSymptom: () => _openSymptomForm(context, patientId),
+          onAddAppointment: () => _openAppointmentForm(context, patientId),
+        ),
         const SizedBox(height: 14),
-        _StatsRow(symptoms: _symptoms.length, treatments: _treatments.length, vitals: _vitals.length, appointments: _appointments.length),
+        _StatsRow(
+          symptomsCount: symptomsAsync.maybeWhen(data: (list) => list.length, orElse: () => 0),
+          treatmentsCount: medicationsAsync.maybeWhen(data: (list) => list.length, orElse: () => 0),
+          vitalsCount: constantsAsync.maybeWhen(data: (list) => list.length, orElse: () => 0),
+          appointmentsCount: appointmentsAsync.maybeWhen(data: (list) => list.length, orElse: () => 0),
+        ),
         const SizedBox(height: 14),
         SectionCard(
           title: 'Rendez-vous',
           actionLabel: 'Ajouter',
-          onAction: _openAppointmentForm,
-          child: Column(children: _appointments.map((a) => _AppointmentTile(appt: a, onReschedule: _reschedule, onCancel: _cancel, onTeleconsultation: _teleconsult)).toList()),
+          onAction: () => _openAppointmentForm(context, patientId),
+          child: appointmentsAsync.when(
+            data: (list) => list.isEmpty
+                ? const Padding(padding: EdgeInsets.all(16), child: Text('Aucun rendez-vous', style: TextStyle(color: Colors.grey)))
+                : Column(children: list.map((a) => _AppointmentTile(appt: a, onReschedule: () => _rescheduleAppointment(context, a), onCancel: () => _cancelAppointment(context, a), onTeleconsultation: () => _startJitsiCall(a))).toList()),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Erreur: $e'),
+          ),
         ),
         const SizedBox(height: 14),
-        SectionCard(title: 'Symptômes', actionLabel: 'Enregistrer', onAction: _openSymptomForm, child: Column(children: _symptoms.map((s) => _SymptomTile(symptom: s)).toList())),
+        SectionCard(
+          title: 'Symptômes',
+          actionLabel: 'Enregistrer',
+          onAction: () => _openSymptomForm(context, patientId),
+          child: symptomsAsync.when(
+            data: (list) => list.isEmpty
+                ? const Padding(padding: EdgeInsets.all(16), child: Text('Aucun symptôme', style: TextStyle(color: Colors.grey)))
+                : Column(children: list.map((s) => _SymptomTile(symptom: s)).toList()),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Erreur: $e'),
+          ),
+        ),
         const SizedBox(height: 14),
-        SectionCard(title: 'Constantes', actionLabel: 'Ajouter', onAction: _openVitalForm, child: Column(children: [_VitalBars(vitals: _vitals), const SizedBox(height: 10), ..._vitals.map((v) => _VitalTile(vital: v))])),
+        SectionCard(
+          title: 'Constantes',
+          actionLabel: 'Ajouter',
+          onAction: () => _openVitalForm(context, patientId),
+          child: constantsAsync.when(
+            data: (list) => list.isEmpty
+                ? const Padding(padding: EdgeInsets.all(16), child: Text('Aucune constante', style: TextStyle(color: Colors.grey)))
+                : Column(children: [_VitalBars(vitals: list), const SizedBox(height: 10), ...list.map((v) => _VitalTile(vital: v))]),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Erreur: $e'),
+          ),
+        ),
         const SizedBox(height: 14),
-        SectionCard(title: 'Traitements', child: Column(children: _treatments.map((t) => _TreatmentTile(treatment: t, onToggle: (v) => _toggleTreatment(t, v))).toList())),
+        SectionCard(
+          title: 'Traitements',
+          child: medicationsAsync.when(
+            data: (list) => list.isEmpty
+                ? const Padding(padding: EdgeInsets.all(16), child: Text('Aucun traitement', style: TextStyle(color: Colors.grey)))
+                : Column(children: list.map((m) => _TreatmentTile(treatment: m, onToggle: (val) => _toggleMedicationAlert(context, m, val))).toList()),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Erreur: $e'),
+          ),
+        ),
         const SizedBox(height: 14),
-        SectionCard(title: 'Documents', actionLabel: 'Ajouter', onAction: _addDocument, child: Column(children: _documents.map((d) => _DocumentTile(doc: d, onShare: _shareDocument)).toList())),
+        SectionCard(
+          title: 'Documents',
+          actionLabel: 'Ajouter',
+          onAction: () => _addDocument(context, patientId),
+          child: documentsAsync.when(
+            data: (list) => list.isEmpty
+                ? const Padding(padding: EdgeInsets.all(16), child: Text('Aucun document', style: TextStyle(color: Colors.grey)))
+                : Column(children: list.map((d) => _DocumentTile(doc: d, onShare: () => _shareDocument(context, d))).toList()),
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (e, _) => Text('Erreur: $e'),
+          ),
+        ),
         const SizedBox(height: 14),
         SectionCard(title: 'Articles bien-être', child: _WellnessRow()),
         const SizedBox(height: 14),
-        _EmergencyCard(onCall: _call15, onAlert: _alertFamily, sent: _alertSent),
+        _EmergencyCard(onCall: () => _call15(), onAlert: () => _alertFamily(), sent: _alertSent),
         const SizedBox(height: 12),
         _MessagingCard(),
       ],
     );
   }
 
-  Future<void> _openSymptomForm() async {
-    final result = await showModalBottomSheet<PatientSymptom>(
+  // Fonctions d'appel aux repositories
+  Future<void> _openSymptomForm(BuildContext context, String patientId) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const _SymptomForm(),
+      builder: (_) => _SymptomForm(),
     );
     if (result == null) return;
-    setState(() => _symptoms.insert(0, result));
+    final newSymptom = SymptomModel(
+      id: '',
+      patientId: patientId,
+      nom: result['name'],
+      intensité: result['intensity'].toInt(),
+      date: DateTime.now(),
+      notes: result['notes'],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    final repo = ref.read(symptomRepositoryProvider);
+    await repo.addSymptom(newSymptom);
+    ref.invalidate(symptomProvider(patientId));
+    showThixFeatureReadySnackBar(context, 'Symptôme enregistré');
   }
 
-  Future<void> _openVitalForm() async {
-    final result = await showModalBottomSheet<PatientVital>(
+  Future<void> _openVitalForm(BuildContext context, String patientId) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const _VitalForm(),
+      builder: (_) => _VitalForm(),
     );
     if (result == null) return;
-    setState(() => _vitals.insert(0, result));
+    final newConstant = ConstantModel(
+      id: '',
+      patientId: patientId,
+      date: DateTime.now(),
+      tensionSystolic: result['systolic'],
+      tensionDiastolic: result['diastolic'],
+      glycemie: result['glycemia'],
+      poids: result['weight'],
+      taille: null,
+      heartRate: null,
+      temperature: null,
+      spo2: null,
+      notes: result['notes'],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    final repo = ref.read(constantRepositoryProvider);
+    await repo.addConstant(newConstant);
+    ref.invalidate(constantProvider(patientId));
+    showThixFeatureReadySnackBar(context, 'Constante enregistrée');
   }
 
-  Future<void> _openAppointmentForm() async {
-    final result = await showModalBottomSheet<PatientAppointment>(
+  Future<void> _openAppointmentForm(BuildContext context, String patientId) async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => const _AppointmentForm(),
+      builder: (_) => _AppointmentForm(),
     );
     if (result == null) return;
-    setState(() => _appointments.insert(0, result));
+    final newAppt = AppointmentModel(
+      id: '',
+      patientId: patientId,
+      patientName: '', // à récupérer du profil
+      doctorId: result['doctorId'] ?? '',
+      doctorName: result['doctorName'] ?? 'Médecin',
+      specialty: result['specialty'] ?? 'Généraliste',
+      date: DateTime.now(),
+      time: '${DateTime.now().hour}:${DateTime.now().minute}',
+      status: 'pending',
+      notes: result['notes'],
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    final repo = ref.read(appointmentRepositoryProvider);
+    await repo.createAppointment(newAppt);
+    ref.invalidate(appointmentProvider(patientId));
+    showThixFeatureReadySnackBar(context, 'Rendez-vous planifié');
   }
 
-  void _toggleTreatment(PatientTreatment treatment, bool value) {
-    final idx = _treatments.indexOf(treatment);
-    if (idx == -1) return;
-    setState(() => _treatments[idx] = treatment.copyWith(alerts: value));
+  Future<void> _toggleMedicationAlert(BuildContext context, MedicationModel med, bool value) async {
+    final repo = ref.read(medicationRepositoryProvider);
+    final updated = med.copyWith(alert: value);
+    await repo.updateMedication(updated);
+    ref.invalidate(medicationProvider(med.patientId));
     showThixFeatureReadySnackBar(context, value ? 'Rappel activé' : 'Rappel désactivé');
   }
 
-  void _reschedule(PatientAppointment appt) {
-    final idx = _appointments.indexOf(appt);
-    if (idx == -1) return;
-    setState(() => _appointments[idx] = appt.copyWith(status: 'Replanifié +2h'));
+  Future<void> _rescheduleAppointment(BuildContext context, AppointmentModel appt) async {
+    final newDate = DateTime.now().add(const Duration(days: 2));
+    final updated = appt.copyWith(date: newDate, status: 'confirmed');
+    final repo = ref.read(appointmentRepositoryProvider);
+    await repo.updateAppointment(updated);
+    ref.invalidate(appointmentProvider(appt.patientId));
     showThixFeatureReadySnackBar(context, 'RDV replanifié');
   }
 
-  void _cancel(PatientAppointment appt) {
-    setState(() => _appointments.remove(appt));
+  Future<void> _cancelAppointment(BuildContext context, AppointmentModel appt) async {
+    final repo = ref.read(appointmentRepositoryProvider);
+    await repo.cancelAppointment(appt.id);
+    ref.invalidate(appointmentProvider(appt.patientId));
     showThixFeatureReadySnackBar(context, 'RDV annulé');
   }
 
-  void _teleconsult(PatientAppointment appt) {
-    final room = appt.teleRoom ?? 'thix-${Random().nextInt(9000) + 1000}';
-    showDialog<void>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Téléconsultation Jitsi'),
-        content: Text('Salon : $room\nOuvrez ce nom de salle dans Jitsi Meet.'),
-        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Fermer'))],
-      ),
-    );
+  Future<void> _startJitsiCall(AppointmentModel appt) async {
+    final room = appt.teleRoom ?? 'thix-${DateTime.now().millisecondsSinceEpoch}';
+    var options = JitsiMeetingOptions(room: room)
+      ..serverURL = 'https://meet.jit.si'
+      ..displayName = 'Patient THIX'
+      ..subject = 'Consultation avec ${appt.doctorName}';
+    try {
+      await JitsiMeet.joinMeeting(options);
+    } catch (e) {
+      showThixFeatureReadySnackBar(context, 'Erreur Jitsi: $e');
+    }
   }
 
-  void _addDocument() {
-    setState(() => _documents.add(PatientDocument(title: 'Document ${_documents.length + 1}', type: 'Upload')));
+  Future<void> _addDocument(BuildContext context, String patientId) async {
+    // Simuler l'upload (à connecter à StorageService)
     showThixFeatureReadySnackBar(context, 'Ajoutez vos PDF ou photos depuis Documents');
   }
 
-  void _shareDocument(PatientDocument doc) {
-    final token = Random().nextInt(999999).toString().padLeft(6, '0');
-    showDialog<void>(
+  Future<void> _shareDocument(BuildContext context, String docName) async {
+    final token = DateTime.now().millisecondsSinceEpoch.toString();
+    final link = 'https://thix.health/share/$docName-$token';
+    showDialog(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Lien expirable'),
-        content: Text('https://thix.health/share/${doc.title}-$token'),
+        content: Text(link),
         actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))],
       ),
     );
   }
 
-  void _call15() => showThixFeatureReadySnackBar(context, 'Appel 15 déclenché');
+  void _call15() {
+    // Lancer tel:15 via url_launcher
+    showThixFeatureReadySnackBar(context, 'Appel 15 déclenché');
+  }
 
   void _alertFamily() {
     setState(() => _alertSent = true);
@@ -186,11 +334,22 @@ class _PatientWorkspaceState extends State<PatientWorkspace> {
   }
 }
 
-class _ScoreCard extends StatelessWidget {
-  const _ScoreCard({required this.score, required this.permissions});
+// ============================================================
+// 4. SCORE DE SANTÉ (AVEC EDGE FUNCTION)
+// ============================================================
 
+final healthScoreProvider = FutureProvider.family<double, String>((ref, patientId) async {
+  final aiService = ref.read(openAIServiceProvider);
+  final analysis = await aiService.getPredictiveAnalysis(patientId);
+  return analysis?['healthScore']?.toDouble() ?? 0.0;
+});
+
+class _HealthScoreCard extends StatelessWidget {
+  const _HealthScoreCard({required this.score, required this.permissions, this.loading = false, this.error = false});
   final double score;
   final Map<String, bool> permissions;
+  final bool loading;
+  final bool error;
 
   @override
   Widget build(BuildContext context) {
@@ -203,21 +362,35 @@ class _ScoreCard extends StatelessWidget {
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('Score de santé IA', style: context.textStyles.titleMedium?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
               const SizedBox(height: 8),
-              Text('Basé sur symptômes, constantes, traitements et RDV.', style: context.textStyles.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.92))),
+              Text(error ? 'Erreur de chargement' : loading ? 'Calcul en cours...' : 'Basé sur symptômes, constantes, traitements et RDV.', style: context.textStyles.bodySmall?.copyWith(color: Colors.white.withValues(alpha: 0.92))),
               const SizedBox(height: 8),
-              Wrap(spacing: 6, runSpacing: 6, children: permissions.entries.map((e) => Chip(label: Text('${e.key}:${e.value ? 'on' : 'off'}'), backgroundColor: Colors.white.withValues(alpha: 0.16), labelStyle: context.textStyles.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800))).toList()),
+              if (!error && !loading)
+                Wrap(spacing: 6, runSpacing: 6, children: permissions.entries.map((e) => Chip(label: Text('${e.key}:${e.value ? 'on' : 'off'}'), backgroundColor: Colors.white.withValues(alpha: 0.16), labelStyle: context.textStyles.labelSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w800))).toList()),
             ]),
           ),
-          Container(width: 88, height: 88, decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(22)), alignment: Alignment.center, child: Text('${score.toStringAsFixed(0)}/100', style: context.textStyles.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w900))),
+          Container(
+            width: 88,
+            height: 88,
+            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(22)),
+            alignment: Alignment.center,
+            child: loading
+                ? const CircularProgressIndicator(color: Colors.white)
+                : error
+                    ? const Icon(Icons.error_outline, color: Colors.white)
+                    : Text('${score.toStringAsFixed(0)}/100', style: context.textStyles.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.w900)),
+          ),
         ],
       ),
     );
   }
 }
 
+// ============================================================
+// 5. TOUS LES AUTRES WIDGETS (STATELESS, AVEC DONNÉES)
+// ============================================================
+
 class _QuickServices extends StatelessWidget {
   const _QuickServices({required this.onAddSymptom, required this.onAddAppointment});
-
   final VoidCallback onAddSymptom;
   final VoidCallback onAddAppointment;
 
@@ -243,7 +416,6 @@ class _QuickItem {
 
 class _QuickTile extends StatelessWidget {
   const _QuickTile({required this.item});
-
   final _QuickItem item;
 
   @override
@@ -270,20 +442,19 @@ class _QuickTile extends StatelessWidget {
 }
 
 class _StatsRow extends StatelessWidget {
-  const _StatsRow({required this.symptoms, required this.treatments, required this.vitals, required this.appointments});
-
-  final int symptoms;
-  final int treatments;
-  final int vitals;
-  final int appointments;
+  const _StatsRow({required this.symptomsCount, required this.treatmentsCount, required this.vitalsCount, required this.appointmentsCount});
+  final int symptomsCount;
+  final int treatmentsCount;
+  final int vitalsCount;
+  final int appointmentsCount;
 
   @override
   Widget build(BuildContext context) {
     final items = [
-      _StatItem(label: 'Symptômes', value: symptoms.toString(), icon: Icons.sick_rounded, color: const Color(0xFF2453FF)),
-      _StatItem(label: 'Traitements', value: treatments.toString(), icon: Icons.medication_rounded, color: const Color(0xFF7C3AED)),
-      _StatItem(label: 'Constantes', value: vitals.toString(), icon: Icons.monitor_heart_outlined, color: const Color(0xFF10B981)),
-      _StatItem(label: 'RDV', value: appointments.toString(), icon: Icons.calendar_month_rounded, color: const Color(0xFFFF6B00)),
+      _StatItem(label: 'Symptômes', value: symptomsCount.toString(), icon: Icons.sick_rounded, color: const Color(0xFF2453FF)),
+      _StatItem(label: 'Traitements', value: treatmentsCount.toString(), icon: Icons.medication_rounded, color: const Color(0xFF7C3AED)),
+      _StatItem(label: 'Constantes', value: vitalsCount.toString(), icon: Icons.monitor_heart_outlined, color: const Color(0xFF10B981)),
+      _StatItem(label: 'RDV', value: appointmentsCount.toString(), icon: Icons.calendar_month_rounded, color: const Color(0xFFFF6B00)),
     ];
     return Container(
       padding: const EdgeInsets.all(12),
@@ -303,7 +474,6 @@ class _StatItem {
 
 class _StatTile extends StatelessWidget {
   const _StatTile({required this.item});
-
   final _StatItem item;
 
   @override
@@ -312,13 +482,13 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+// --- Appointment Tile ---
 class _AppointmentTile extends StatelessWidget {
   const _AppointmentTile({required this.appt, required this.onReschedule, required this.onCancel, required this.onTeleconsultation});
-
-  final PatientAppointment appt;
-  final ValueChanged<PatientAppointment> onReschedule;
-  final ValueChanged<PatientAppointment> onCancel;
-  final ValueChanged<PatientAppointment> onTeleconsultation;
+  final AppointmentModel appt;
+  final VoidCallback onReschedule;
+  final VoidCallback onCancel;
+  final VoidCallback onTeleconsultation;
 
   @override
   Widget build(BuildContext context) {
@@ -327,20 +497,20 @@ class _AppointmentTile extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [Icon(Icons.event_available_rounded, color: AppColors.primaryBlue), const SizedBox(width: 8), Expanded(child: Text('${appt.kind} · ${appt.doctor}', style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800))), _Pill(text: appt.status)]),
+        Row(children: [Icon(Icons.event_available_rounded, color: AppColors.primaryBlue), const SizedBox(width: 8), Expanded(child: Text('${appt.specialty} · ${appt.doctorName}', style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800))), _Pill(text: appt.status)]),
         const SizedBox(height: 6),
-        Text(appt.reason, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary)),
+        Text(appt.notes ?? '', style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary)),
         const SizedBox(height: 10),
-        Row(children: [OutlinedButton(onPressed: () => onReschedule(appt), child: const Text('Reporter')), const SizedBox(width: 8), OutlinedButton(onPressed: () => onCancel(appt), child: const Text('Annuler')), const Spacer(), FilledButton.icon(onPressed: () => onTeleconsultation(appt), icon: const Icon(Icons.video_call_rounded), label: const Text('Téléconsultation'))]),
+        Row(children: [OutlinedButton(onPressed: onReschedule, child: const Text('Reporter')), const SizedBox(width: 8), OutlinedButton(onPressed: onCancel, child: const Text('Annuler')), const Spacer(), FilledButton.icon(onPressed: onTeleconsultation, icon: const Icon(Icons.video_call_rounded), label: const Text('Téléconsultation'))]),
       ]),
     );
   }
 }
 
+// --- Symptom Tile ---
 class _SymptomTile extends StatelessWidget {
   const _SymptomTile({required this.symptom});
-
-  final PatientSymptom symptom;
+  final SymptomModel symptom;
 
   @override
   Widget build(BuildContext context) {
@@ -348,60 +518,66 @@ class _SymptomTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
-      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.12), child: Text(symptom.intensity.toString(), style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: AppColors.primaryBlue))), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(symptom.name, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), if (symptom.notes.isNotEmpty) Text(symptom.notes, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
+      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.12), child: Text(symptom.intensité.toString(), style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: AppColors.primaryBlue))), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(symptom.nom, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), if (symptom.notes != null && symptom.notes!.isNotEmpty) Text(symptom.notes!, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
     );
   }
 }
 
+// --- VitalBars ---
 class _VitalBars extends StatelessWidget {
   const _VitalBars({required this.vitals});
-
-  final List<PatientVital> vitals;
+  final List<ConstantModel> vitals;
 
   @override
   Widget build(BuildContext context) {
-    final grouped = <VitalType, List<PatientVital>>{};
+    final grouped = <String, List<ConstantModel>>{};
     for (final v in vitals) {
-      grouped.putIfAbsent(v.type, () => []).add(v);
+      if (v.tensionSystolic != null) grouped.putIfAbsent('Tension', () => []).add(v);
+      else if (v.glycemie != null) grouped.putIfAbsent('Glycémie', () => []).add(v);
+      else if (v.poids != null) grouped.putIfAbsent('Poids', () => []).add(v);
     }
+    final colors = {'Tension': const Color(0xFF2453FF), 'Glycémie': const Color(0xFF10B981), 'Poids': const Color(0xFFFF6B00)};
     return Row(
-      children: grouped.entries
-          .map(
-            (e) => Expanded(
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: AppColors.lightGrayBackground, borderRadius: BorderRadius.circular(14)),
-                child: Column(children: [Text(e.key.label, style: context.textStyles.labelLarge?.copyWith(fontWeight: FontWeight.w800)), const SizedBox(height: 6), SizedBox(height: 78, child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: e.value.map((v) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Container(height: v.normalizedHeight * 70, decoration: BoxDecoration(color: e.key.color, borderRadius: BorderRadius.circular(8)))))).toList()))]),
-              ),
-            ),
-          )
-          .toList(),
+      children: grouped.entries.map((e) => Expanded(
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 6),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: AppColors.lightGrayBackground, borderRadius: BorderRadius.circular(14)),
+          child: Column(children: [Text(e.key, style: context.textStyles.labelLarge?.copyWith(fontWeight: FontWeight.w800)), const SizedBox(height: 6), SizedBox(height: 78, child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: e.value.map((v) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 2), child: Container(height: _normalizedHeight(v, e.key), decoration: BoxDecoration(color: colors[e.key], borderRadius: BorderRadius.circular(8)))))).toList()))]),
+        ),
+      )).toList(),
     );
+  }
+
+  double _normalizedHeight(ConstantModel v, String type) {
+    if (type == 'Tension' && v.tensionSystolic != null) return (v.tensionSystolic! / 180).clamp(0.2, 1.0) * 70;
+    if (type == 'Glycémie' && v.glycemie != null) return (v.glycemie! / 2).clamp(0.2, 1.0) * 70;
+    if (type == 'Poids' && v.poids != null) return (v.poids! / 120).clamp(0.2, 1.0) * 70;
+    return 0;
   }
 }
 
+// --- Vital Tile ---
 class _VitalTile extends StatelessWidget {
   const _VitalTile({required this.vital});
-
-  final PatientVital vital;
+  final ConstantModel vital;
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = vital.type == VitalType.tension ? '${vital.primary.toStringAsFixed(0)}/${vital.secondary?.toStringAsFixed(0) ?? '-'} mmHg' : vital.type == VitalType.glycemia ? '${vital.primary.toStringAsFixed(2)} g/L' : '${vital.primary.toStringAsFixed(1)} kg';
+    final subtitle = vital.tensionSystolic != null ? '${vital.tensionSystolic!.toStringAsFixed(0)}/${vital.tensionDiastolic?.toStringAsFixed(0) ?? '-'} mmHg' : vital.glycemie != null ? '${vital.glycemie!.toStringAsFixed(2)} g/L' : vital.poids != null ? '${vital.poids!.toStringAsFixed(1)} kg' : '';
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
-      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: vital.type.color.withValues(alpha: 0.12), child: Icon(vital.type.icon, color: vital.type.color)), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(vital.type.label, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text(subtitle, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
+      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.12), child: Icon(Icons.monitor_heart_rounded, color: AppColors.primaryBlue)), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Constante', style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text(subtitle, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
     );
   }
 }
 
+// --- Treatment Tile ---
 class _TreatmentTile extends StatelessWidget {
   const _TreatmentTile({required this.treatment, required this.onToggle});
-
-  final PatientTreatment treatment;
+  final MedicationModel treatment;
   final ValueChanged<bool> onToggle;
 
   @override
@@ -410,16 +586,16 @@ class _TreatmentTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Expanded(child: Text(treatment.name, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800))), Switch(value: treatment.alerts, onChanged: onToggle)]), Text('${treatment.dosage} · ${treatment.schedule}', style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Expanded(child: Text(treatment.name, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800))), Switch(value: treatment.alert ?? false, onChanged: onToggle)]), Text('${treatment.dosage} · ${treatment.frequency}', style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]),
     );
   }
 }
 
+// --- Document Tile ---
 class _DocumentTile extends StatelessWidget {
   const _DocumentTile({required this.doc, required this.onShare});
-
-  final PatientDocument doc;
-  final ValueChanged<PatientDocument> onShare;
+  final String doc;
+  final VoidCallback onShare;
 
   @override
   Widget build(BuildContext context) {
@@ -427,11 +603,12 @@ class _DocumentTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
-      child: Row(children: [Icon(Icons.description_rounded, color: AppColors.primaryBlue), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(doc.title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text(doc.type, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))])), TextButton(onPressed: () => onShare(doc), child: const Text('Partager'))]),
+      child: Row(children: [Icon(Icons.description_rounded, color: AppColors.primaryBlue), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(doc, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text('Document', style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))])), TextButton(onPressed: onShare, child: const Text('Partager'))]),
     );
   }
 }
 
+// --- Wellness Row ---
 class _WellnessRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -457,9 +634,17 @@ class _WellnessRow extends StatelessWidget {
   }
 }
 
+class _WellnessItem {
+  const _WellnessItem({required this.title, required this.tag, required this.icon, required this.color});
+  final String title;
+  final String tag;
+  final IconData icon;
+  final Color color;
+}
+
+// --- Emergency Card ---
 class _EmergencyCard extends StatelessWidget {
   const _EmergencyCard({required this.onCall, required this.onAlert, required this.sent});
-
   final VoidCallback onCall;
   final VoidCallback onAlert;
   final bool sent;
@@ -474,6 +659,7 @@ class _EmergencyCard extends StatelessWidget {
   }
 }
 
+// --- Messaging Card ---
 class _MessagingCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -488,6 +674,148 @@ class _MessagingCard extends StatelessWidget {
     );
   }
 }
+
+// ============================================================
+// 6. FORMULAIRES (MODALES)
+// ============================================================
+
+class _SymptomForm extends StatefulWidget {
+  const _SymptomForm();
+  @override
+  State<_SymptomForm> createState() => _SymptomFormState();
+}
+
+class _SymptomFormState extends State<_SymptomForm> {
+  final _name = TextEditingController();
+  final _notes = TextEditingController();
+  double _intensity = 3;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Enregistrer un symptôme', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nom du symptôme')),
+          const SizedBox(height: 10),
+          Row(children: [Text('Intensité ${_intensity.toStringAsFixed(0)}/5'), Expanded(child: Slider(value: _intensity, min: 1, max: 5, divisions: 4, onChanged: (v) => setState(() => _intensity = v)))]),
+          TextField(controller: _notes, decoration: const InputDecoration(labelText: 'Notes'), maxLines: 3),
+          const SizedBox(height: 14),
+          FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.save_rounded), label: const Text('Sauvegarder')),
+        ]),
+      ),
+    );
+  }
+
+  void _submit() {
+    if (_name.text.trim().isEmpty) return;
+    Navigator.of(context).pop({'name': _name.text.trim(), 'intensity': _intensity, 'notes': _notes.text.trim()});
+  }
+}
+
+class _VitalForm extends StatefulWidget {
+  const _VitalForm();
+  @override
+  State<_VitalForm> createState() => _VitalFormState();
+}
+
+class _VitalFormState extends State<_VitalForm> {
+  String _type = 'Tension';
+  final _primary = TextEditingController();
+  final _secondary = TextEditingController();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Ajouter une constante', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _type,
+            items: ['Tension', 'Glycémie', 'Poids'].map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+            onChanged: (v) => setState(() => _type = v ?? 'Tension'),
+            decoration: const InputDecoration(labelText: 'Type'),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _primary,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(labelText: _type == 'Poids' ? 'Poids (kg)' : _type == 'Glycémie' ? 'Glycémie (g/L)' : 'Tension systolique'),
+          ),
+          if (_type == 'Tension') ...[const SizedBox(height: 10), TextField(controller: _secondary, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tension diastolique'))],
+          const SizedBox(height: 14),
+          FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.save_rounded), label: const Text('Sauvegarder')),
+        ]),
+      ),
+    );
+  }
+
+  void _submit() {
+    final primary = double.tryParse(_primary.text.replaceAll(',', '.'));
+    if (primary == null) return;
+    final data = {
+      'systolic': _type == 'Tension' ? primary : null,
+      'diastolic': _type == 'Tension' ? double.tryParse(_secondary.text.replaceAll(',', '.')) : null,
+      'glycemia': _type == 'Glycémie' ? primary : null,
+      'weight': _type == 'Poids' ? primary : null,
+    };
+    Navigator.of(context).pop(data);
+  }
+}
+
+class _AppointmentForm extends StatefulWidget {
+  const _AppointmentForm();
+  @override
+  State<_AppointmentForm> createState() => _AppointmentFormState();
+}
+
+class _AppointmentFormState extends State<_AppointmentForm> {
+  final _doctor = TextEditingController(text: 'Médecin');
+  final _reason = TextEditingController(text: 'Suivi');
+  final _specialty = TextEditingController(text: 'Généraliste');
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Planifier un RDV', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 12),
+          TextField(controller: _doctor, decoration: const InputDecoration(labelText: 'Médecin / Service')),
+          const SizedBox(height: 10),
+          TextField(controller: _specialty, decoration: const InputDecoration(labelText: 'Spécialité')),
+          const SizedBox(height: 10),
+          TextField(controller: _reason, decoration: const InputDecoration(labelText: 'Motif')),
+          const SizedBox(height: 14),
+          FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check_rounded), label: const Text('Planifier')),
+        ]),
+      ),
+    );
+  }
+
+  void _submit() {
+    Navigator.of(context).pop({
+      'doctorName': _doctor.text.trim(),
+      'specialty': _specialty.text.trim(),
+      'notes': _reason.text.trim(),
+    });
+  }
+}
+
+// ============================================================
+// 7. DOCTOR & PHARMACY WORKSPACES (STATIQUES POUR L'EXEMPLE)
+// ============================================================
 
 class DoctorWorkspace extends StatelessWidget {
   const DoctorWorkspace({super.key});
@@ -516,7 +844,6 @@ class DoctorWorkspace extends StatelessWidget {
       _AdminItem(title: 'Interop & Finance', subtitle: 'HL7/FHIR, webhooks, import/export, tarification NGAP/T2A', icon: Icons.sync_alt_rounded, color: const Color(0xFF7C3AED)),
       _AdminItem(title: 'Mobile terrain', subtitle: 'Scan bracelet, dictée vocale, offline, documents scannés', icon: Icons.smartphone_rounded, color: const Color(0xFFE91E63)),
     ];
-
     return Column(
       children: [
         SectionCard(title: 'Espace Médecin', child: Column(children: items.map((i) => _AdminTile(item: i)).toList())),
@@ -546,9 +873,30 @@ class PharmacyWorkspace extends StatelessWidget {
   }
 }
 
+class _AdminTile extends StatelessWidget {
+  const _AdminTile({required this.item});
+  final _AdminItem item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: item.color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)), child: Icon(item.icon, color: item.color)), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(item.title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text(item.subtitle, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]));
+  }
+}
+
+class _AdminItem {
+  const _AdminItem({required this.title, required this.subtitle, required this.icon, required this.color});
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color color;
+}
+
+// ============================================================
+// 8. COMPOSANTS UTILITAIRES
+// ============================================================
+
 class SectionCard extends StatelessWidget {
   const SectionCard({super.key, required this.title, this.actionLabel, this.onAction, required this.child});
-
   final String title;
   final String? actionLabel;
   final VoidCallback? onAction;
@@ -566,178 +914,10 @@ class SectionCard extends StatelessWidget {
 
 class _Pill extends StatelessWidget {
   const _Pill({required this.text});
-
   final String text;
 
   @override
   Widget build(BuildContext context) {
     return Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6), decoration: BoxDecoration(color: AppColors.lightGrayBackground, borderRadius: BorderRadius.circular(10)), child: Text(text, style: context.textStyles.labelSmall?.copyWith(color: AppColors.darkNavy, fontWeight: FontWeight.w800)));
   }
-}
-
-class _SymptomForm extends StatefulWidget {
-  const _SymptomForm();
-
-  @override
-  State<_SymptomForm> createState() => _SymptomFormState();
-}
-
-class _SymptomFormState extends State<_SymptomForm> {
-  final _name = TextEditingController();
-  final _notes = TextEditingController();
-  double _intensity = 3;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Enregistrer un symptôme', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)), const SizedBox(height: 12), TextField(controller: _name, decoration: const InputDecoration(labelText: 'Nom du symptôme')), const SizedBox(height: 10), Row(children: [Text('Intensité ${_intensity.toStringAsFixed(0)}/5'), Expanded(child: Slider(value: _intensity, min: 1, max: 5, divisions: 4, onChanged: (v) => setState(() => _intensity = v)))]), TextField(controller: _notes, decoration: const InputDecoration(labelText: 'Notes'), maxLines: 3), const SizedBox(height: 14), FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.save_rounded), label: const Text('Sauvegarder'))]),
-      ),
-    );
-  }
-
-  void _submit() {
-    if (_name.text.trim().isEmpty) return;
-    Navigator.of(context).pop(PatientSymptom(name: _name.text.trim(), intensity: _intensity.toInt(), notes: _notes.text.trim()));
-  }
-}
-
-class _VitalForm extends StatefulWidget {
-  const _VitalForm();
-
-  @override
-  State<_VitalForm> createState() => _VitalFormState();
-}
-
-class _VitalFormState extends State<_VitalForm> {
-  VitalType _type = VitalType.tension;
-  final _primary = TextEditingController();
-  final _secondary = TextEditingController();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [Text('Ajouter une constante', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)), const SizedBox(height: 12), DropdownButtonFormField<VitalType>(value: _type, decoration: const InputDecoration(labelText: 'Type'), items: VitalType.values.map((v) => DropdownMenuItem(value: v, child: Text(v.label))).toList(), onChanged: (v) => setState(() => _type = v ?? VitalType.tension)), const SizedBox(height: 10), TextField(controller: _primary, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: _type == VitalType.weight ? 'Poids (kg)' : _type == VitalType.glycemia ? 'Glycémie (g/L)' : 'Tension systolique')), if (_type == VitalType.tension) ...[const SizedBox(height: 10), TextField(controller: _secondary, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Tension diastolique'))], const SizedBox(height: 14), FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.save_rounded), label: const Text('Sauvegarder'))]),
-      ),
-    );
-  }
-
-  void _submit() {
-    final primary = double.tryParse(_primary.text.replaceAll(',', '.'));
-    if (primary == null) return;
-    Navigator.of(context).pop(PatientVital(type: _type, primary: primary, secondary: double.tryParse(_secondary.text.replaceAll(',', '.'))));
-  }
-}
-
-class _AppointmentForm extends StatefulWidget {
-  const _AppointmentForm();
-
-  @override
-  State<_AppointmentForm> createState() => _AppointmentFormState();
-}
-
-class _AppointmentFormState extends State<_AppointmentForm> {
-  final _doctor = TextEditingController(text: 'Médecin');
-  final _reason = TextEditingController(text: 'Suivi');
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [Text('Planifier un RDV', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)), const SizedBox(height: 12), TextField(controller: _doctor, decoration: const InputDecoration(labelText: 'Médecin / Service')), const SizedBox(height: 10), TextField(controller: _reason, decoration: const InputDecoration(labelText: 'Motif')), const SizedBox(height: 14), FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check_rounded), label: const Text('Planifier'))]),
-      ),
-    );
-  }
-
-  void _submit() {
-    Navigator.of(context).pop(PatientAppointment(kind: 'Consultation', doctor: _doctor.text.trim(), reason: _reason.text.trim(), status: 'À venir'));
-  }
-}
-
-class _AdminTile extends StatelessWidget {
-  const _AdminTile({required this.item});
-
-  final _AdminItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(margin: const EdgeInsets.only(bottom: 10), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)), child: Row(children: [Container(width: 44, height: 44, decoration: BoxDecoration(color: item.color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14)), child: Icon(item.icon, color: item.color)), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(item.title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), Text(item.subtitle, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]));
-  }
-}
-
-class PatientSymptom {
-  PatientSymptom({required this.name, required this.intensity, required this.notes});
-  final String name;
-  final int intensity;
-  final String notes;
-}
-
-enum VitalType { tension, glycemia, weight }
-
-extension VitalTypeX on VitalType {
-  String get label => switch (this) { VitalType.tension => 'Tension', VitalType.glycemia => 'Glycémie', VitalType.weight => 'Poids' };
-  IconData get icon => switch (this) { VitalType.tension => Icons.monitor_heart_rounded, VitalType.glycemia => Icons.bloodtype_rounded, VitalType.weight => Icons.monitor_weight_rounded };
-  Color get color => switch (this) { VitalType.tension => const Color(0xFF2453FF), VitalType.glycemia => const Color(0xFF10B981), VitalType.weight => const Color(0xFFFF6B00) };
-}
-
-class PatientVital {
-  PatientVital({required this.type, required this.primary, this.secondary});
-  final VitalType type;
-  final double primary;
-  final double? secondary;
-
-  double get normalizedHeight => switch (type) { VitalType.tension => (primary / 180).clamp(0.2, 1.0), VitalType.glycemia => (primary / 2).clamp(0.2, 1.0), VitalType.weight => (primary / 120).clamp(0.2, 1.0) };
-}
-
-class PatientTreatment {
-  PatientTreatment({required this.name, required this.dosage, required this.schedule, required this.alerts});
-  final String name;
-  final String dosage;
-  final String schedule;
-  final bool alerts;
-
-  PatientTreatment copyWith({bool? alerts}) => PatientTreatment(name: name, dosage: dosage, schedule: schedule, alerts: alerts ?? this.alerts);
-}
-
-class PatientAppointment {
-  PatientAppointment({required this.kind, required this.doctor, required this.reason, required this.status, this.teleRoom});
-  final String kind;
-  final String doctor;
-  final String reason;
-  final String status;
-  final String? teleRoom;
-
-  PatientAppointment copyWith({String? status}) => PatientAppointment(kind: kind, doctor: doctor, reason: reason, status: status ?? this.status, teleRoom: teleRoom);
-}
-
-class PatientDocument {
-  PatientDocument({required this.title, required this.type});
-  final String title;
-  final String type;
-}
-
-class _WellnessItem {
-  const _WellnessItem({required this.title, required this.tag, required this.icon, required this.color});
-  final String title;
-  final String tag;
-  final IconData icon;
-  final Color color;
-}
-
-class _AdminItem {
-  const _AdminItem({required this.title, required this.subtitle, required this.icon, required this.color});
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color color;
 }
