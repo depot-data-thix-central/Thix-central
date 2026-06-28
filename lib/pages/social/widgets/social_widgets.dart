@@ -1,8 +1,17 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:thix_central/pages/social/models/social_models.dart';
+import 'package:thix_central/pages/social/providers/social_module_controller.dart';
+import 'package:thix_central/pages/social/widgets/story_viewer_page.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
+import 'package:provider/provider.dart';
 
+// ============================================================
+// Carte de section générique
+// ============================================================
 class SocialSectionCard extends StatelessWidget {
   const SocialSectionCard({
     super.key,
@@ -56,6 +65,9 @@ class SocialSectionCard extends StatelessWidget {
   }
 }
 
+// ============================================================
+// Stripe des stories (avec création)
+// ============================================================
 class SocialStoryStrip extends StatelessWidget {
   const SocialStoryStrip({super.key, required this.stories, required this.highlights});
 
@@ -64,36 +76,31 @@ class SocialStoryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final controller = context.watch<SocialModuleController>();
     return SocialSectionCard(
       title: 'Stories & highlights',
       subtitle: 'Stories 24h, vues et collections épinglées.',
+      trailing: TextButton.icon(
+        onPressed: () => _showCreateStorySheet(context, controller),
+        icon: const Icon(Icons.add_rounded, size: 18),
+        label: const Text('Créer'),
+      ),
       child: Column(
         children: [
           SizedBox(
             height: 108,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: stories.length,
+              itemCount: stories.length + 1, // +1 pour le bouton "Créer"
               separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
               itemBuilder: (context, index) {
-                final story = stories[index];
-                final borderColor = story.isViewed ? AppColors.cardBorder : AppColors.primaryBlue;
-                return Column(
-                  children: [
-                    Container(
-                      width: 64,
-                      height: 64,
-                      padding: const EdgeInsets.all(3),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(color: borderColor, width: 2),
-                      ),
-                      child: ThixAvatar(initials: story.author.initials),
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(story.author.name, style: context.textStyles.labelSmall?.copyWith(fontWeight: FontWeight.w700)),
-                    Text('${story.viewCount} vues', style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
-                  ],
+                if (index == 0) {
+                  return _StoryCreateButton(onTap: () => _showCreateStorySheet(context, controller));
+                }
+                final story = stories[index - 1];
+                return _StoryTile(
+                  story: story,
+                  onTap: () => _openStory(context, story),
                 );
               },
             ),
@@ -117,8 +124,94 @@ class SocialStoryStrip extends StatelessWidget {
       ),
     );
   }
+
+  void _showCreateStorySheet(BuildContext context, SocialModuleController controller) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = File(result.files.single.path!);
+    try {
+      await controller.createStory(mediaFile: file);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Story publiée')));
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
+  }
+
+  void _openStory(BuildContext context, SocialStory story) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => StoryViewerPage(story: story)),
+    );
+  }
 }
 
+class _StoryCreateButton extends StatelessWidget {
+  const _StoryCreateButton({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            decoration: BoxDecoration(
+              color: AppColors.lightGrayBackground,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(color: AppColors.cardBorder),
+            ),
+            child: const Icon(Icons.add_rounded, color: AppColors.primaryBlue, size: 28),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Créer', style: context.textStyles.labelSmall?.copyWith(fontWeight: FontWeight.w700)),
+        ],
+      ),
+    );
+  }
+}
+
+class _StoryTile extends StatelessWidget {
+  const _StoryTile({required this.story, required this.onTap});
+  final SocialStory story;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final borderColor = story.isViewed ? AppColors.cardBorder : AppColors.primaryBlue;
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 64,
+            height: 64,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: borderColor, width: 2),
+            ),
+            child: ThixAvatar(initials: story.author.initials),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(story.author.name, style: context.textStyles.labelSmall?.copyWith(fontWeight: FontWeight.w700)),
+          Text('${story.viewCount} vues', style: context.textStyles.labelSmall?.copyWith(color: AppColors.textSecondary)),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================
+// Statistiques
+// ============================================================
 class SocialStatsRow extends StatelessWidget {
   const SocialStatsRow({super.key, required this.analytics, required this.unreadNotifications, required this.unreadMessages});
 
@@ -187,6 +280,9 @@ class _StatTile extends StatelessWidget {
   }
 }
 
+// ============================================================
+// Sélecteur de tri
+// ============================================================
 class SocialSortSelector extends StatelessWidget {
   const SocialSortSelector({super.key, required this.sort, required this.onChanged});
 
@@ -216,6 +312,9 @@ class SocialSortSelector extends StatelessWidget {
   }
 }
 
+// ============================================================
+// Carte d'un post (complète)
+// ============================================================
 class SocialPostCard extends StatelessWidget {
   const SocialPostCard({
     super.key,
@@ -225,6 +324,7 @@ class SocialPostCard extends StatelessWidget {
     required this.onBookmark,
     required this.onShare,
     required this.onRepost,
+    required this.onPollVote,
   });
 
   final SocialPost post;
@@ -233,6 +333,7 @@ class SocialPostCard extends StatelessWidget {
   final VoidCallback onBookmark;
   final VoidCallback onShare;
   final VoidCallback onRepost;
+  final ValueChanged<String> onPollVote;
 
   @override
   Widget build(BuildContext context) {
@@ -272,7 +373,10 @@ class SocialPostCard extends StatelessWidget {
           if (post.kind == SocialPostKind.repost && post.repostAuthorName != null)
             Padding(
               padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Text('Repost de ${post.repostAuthorName}', style: context.textStyles.labelMedium?.copyWith(color: AppColors.textSecondary)),
+              child: Text(
+                'Repost de ${post.repostAuthorName}',
+                style: context.textStyles.labelMedium?.copyWith(color: AppColors.textSecondary),
+              ),
             ),
           if (post.quote != null && post.quote!.trim().isNotEmpty)
             Container(
@@ -291,88 +395,23 @@ class SocialPostCard extends StatelessWidget {
             Wrap(
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
-              children: post.mediaUrls
-                  .map(
-                    (url) => Container(
-                      width: 180,
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(AppRadius.serviceCard),
-                        gradient: AppColors.primaryBlueGradient,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(post.kind == SocialPostKind.video || post.kind == SocialPostKind.reel ? Icons.play_circle_fill : Icons.image_outlined, color: Colors.white),
-                          const SizedBox(height: AppSpacing.sm),
-                          Text(
-                            url,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: context.textStyles.bodySmall?.copyWith(color: Colors.white70),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                  .toList(),
+              children: post.mediaUrls.map((url) => _MediaPreview(url: url, kind: post.kind)).toList(),
             ),
           ],
           if (post.poll != null) ...[
             const SizedBox(height: AppSpacing.md),
-            Text(post.poll!.question, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
-            const SizedBox(height: AppSpacing.sm),
-            ...post.poll!.options.map(
-              (option) {
-                final totalVotes = post.poll!.totalVotes == 0 ? 1 : post.poll!.totalVotes;
-                final progress = option.votes / totalVotes;
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(option.label),
-                          Text('${option.votes} votes', style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary)),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(999),
-                        child: LinearProgressIndicator(value: progress, minHeight: 8),
-                      ),
-                    ],
-                  ),
-                );
+            _PollWidget(
+              poll: post.poll!,
+              onVote: (optionId) {
+                if (!post.poll!.hasVoted) {
+                  onPollVote(optionId);
+                }
               },
             ),
           ],
           if (post.challenge != null) ...[
             const SizedBox(height: AppSpacing.md),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(AppSpacing.md),
-              decoration: BoxDecoration(
-                color: AppColors.lightGrayBackground,
-                borderRadius: BorderRadius.circular(AppRadius.serviceCard),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(post.challenge!.title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text('Prix : ${post.challenge!.prize}'),
-                  Text('${post.challenge!.participants} participants'),
-                  const SizedBox(height: AppSpacing.sm),
-                  Wrap(
-                    spacing: AppSpacing.xs,
-                    children: post.challenge!.leaderboardPreview.map((item) => Chip(label: Text(item))).toList(),
-                  ),
-                ],
-              ),
-            ),
+            _ChallengeWidget(challenge: post.challenge!),
           ],
           if (post.hashtags.isNotEmpty || post.mentions.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
@@ -444,6 +483,146 @@ class SocialPostCard extends StatelessWidget {
   }
 }
 
+class _MediaPreview extends StatelessWidget {
+  const _MediaPreview({required this.url, required this.kind});
+  final String url;
+  final SocialPostKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 120,
+      height: 80,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.serviceCard),
+        gradient: AppColors.primaryBlueGradient,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            kind == SocialPostKind.video || kind == SocialPostKind.reel ? Icons.play_circle_fill : Icons.image_outlined,
+            color: Colors.white,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            url.split('/').last,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: context.textStyles.bodySmall?.copyWith(color: Colors.white70),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PollWidget extends StatelessWidget {
+  const _PollWidget({required this.poll, required this.onVote});
+  final SocialPoll poll;
+  final ValueChanged<String> onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    final totalVotes = poll.totalVotes == 0 ? 1 : poll.totalVotes;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(poll.question, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: AppSpacing.sm),
+        ...poll.options.map(
+          (option) {
+            final progress = option.votes / totalVotes;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+              child: InkWell(
+                onTap: poll.hasVoted ? null : () => onVote(option.id),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            if (option.isSelected)
+                              const Icon(Icons.check_circle, size: 16, color: AppColors.primaryBlue),
+                            const SizedBox(width: 4),
+                            Text(option.label),
+                          ],
+                        ),
+                        Text(
+                          poll.hasVoted ? '${option.votes} votes (${(progress * 100).round()}%)' : '',
+                          style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 8,
+                        backgroundColor: AppColors.lightGrayBackground,
+                        valueColor: AlwaysStoppedAnimation<Color>(
+                          option.isSelected ? AppColors.primaryBlue : AppColors.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+        if (!poll.hasVoted)
+          Text(
+            '${poll.options.first.votes + poll.options.last.votes + 1} votes reçus · Sondage actif',
+            style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary),
+          ),
+      ],
+    );
+  }
+}
+
+class _ChallengeWidget extends StatelessWidget {
+  const _ChallengeWidget({required this.challenge});
+  final SocialChallenge challenge;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.lightGrayBackground,
+        borderRadius: BorderRadius.circular(AppRadius.serviceCard),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(challenge.title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: AppSpacing.xs),
+          Text('Prix : ${challenge.prize}'),
+          Text('${challenge.participants} participants'),
+          Text('Fin : ${_formatDate(challenge.deadline)}'),
+          const SizedBox(height: AppSpacing.sm),
+          Wrap(
+            spacing: AppSpacing.xs,
+            children: challenge.leaderboardPreview.map((item) => Chip(label: Text(item))).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+}
+
 class _ActionButton extends StatelessWidget {
   const _ActionButton({required this.icon, required this.label, required this.onTap, this.color = AppColors.textSecondary});
 
@@ -477,17 +656,30 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+// ============================================================
+// Sidebar (communautés, suggestions, notifications, messages)
+// ============================================================
 class SocialSidebarSection extends StatelessWidget {
-  const SocialSidebarSection({super.key, required this.snapshot, required this.onToggleConnection, required this.onNotificationTap});
+  const SocialSidebarSection({
+    super.key,
+    required this.snapshot,
+    required this.onToggleConnection,
+    required this.onNotificationTap,
+    required this.onCommunityJoin,
+    required this.onMessageTap,
+  });
 
   final SocialModuleSnapshot snapshot;
   final Future<void> Function(String) onToggleConnection;
   final Future<void> Function(String) onNotificationTap;
+  final void Function(SocialCommunity) onCommunityJoin;
+  final void Function(SocialConversation) onMessageTap;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
+        // Communautés
         SocialSectionCard(
           title: 'Communautés',
           subtitle: 'Création, rôles et visibilité public/privé.',
@@ -496,16 +688,24 @@ class SocialSidebarSection extends StatelessWidget {
                 .map(
                   (community) => ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(backgroundColor: AppColors.lightGrayBackground, child: Icon(community.isPrivate ? Icons.lock_outline : Icons.groups_outlined)),
+                    leading: CircleAvatar(
+                      backgroundColor: AppColors.lightGrayBackground,
+                      child: Icon(community.isPrivate ? Icons.lock_outline : Icons.groups_outlined),
+                    ),
                     title: Text(community.name),
                     subtitle: Text('${community.memberCount} membres · ${community.isPrivate ? 'Privé' : 'Public'}'),
-                    trailing: Text(community.isJoined ? community.role : 'Rejoindre', style: context.textStyles.labelMedium?.copyWith(color: AppColors.primaryBlue, fontWeight: FontWeight.w700)),
+                    trailing: TextButton(
+                      onPressed: () => onCommunityJoin(community),
+                      child: Text(community.isJoined ? community.role : 'Rejoindre'),
+                    ),
                   ),
                 )
                 .toList(),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
+
+        // Suggestions de connexions
         SocialSectionCard(
           title: 'Connexions suggérées',
           subtitle: 'Demandes, amis et abonnements.',
@@ -514,7 +714,10 @@ class SocialSidebarSection extends StatelessWidget {
                 .map(
                   (suggestion) => ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(backgroundColor: AppColors.lightGrayBackground, child: Text(suggestion.name.substring(0, 1))),
+                    leading: CircleAvatar(
+                      backgroundColor: AppColors.lightGrayBackground,
+                      child: Text(suggestion.name.substring(0, 1)),
+                    ),
                     title: Text(suggestion.name),
                     subtitle: Text('${suggestion.role} · ${suggestion.mutualConnections} relations communes'),
                     trailing: TextButton(
@@ -535,6 +738,8 @@ class SocialSidebarSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
+
+        // Notifications
         SocialSectionCard(
           title: 'Notifications',
           subtitle: 'Centre centralisé et badges temps réel.',
@@ -565,6 +770,8 @@ class SocialSidebarSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
+
+        // Messages privés
         SocialSectionCard(
           title: 'Messages privés',
           subtitle: 'Temps réel, pièces jointes et accusés de lecture.',
@@ -572,8 +779,12 @@ class SocialSidebarSection extends StatelessWidget {
             children: snapshot.conversations
                 .map(
                   (conversation) => ListTile(
+                    onTap: () => onMessageTap(conversation),
                     contentPadding: EdgeInsets.zero,
-                    leading: CircleAvatar(backgroundColor: AppColors.lightGrayBackground, child: Text(conversation.peerName.substring(0, 1))),
+                    leading: CircleAvatar(
+                      backgroundColor: AppColors.lightGrayBackground,
+                      child: Text(conversation.peerName.substring(0, 1)),
+                    ),
                     title: Text(conversation.peerName),
                     subtitle: Text(conversation.lastMessage, maxLines: 2, overflow: TextOverflow.ellipsis),
                     trailing: Column(
@@ -594,6 +805,8 @@ class SocialSidebarSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
+
+        // Tendances
         SocialSectionCard(
           title: 'Recherche & tendances',
           subtitle: 'Hashtags tendances et navigation par mots-clés.',
@@ -604,6 +817,8 @@ class SocialSidebarSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
+
+        // Modération
         SocialSectionCard(
           title: 'Modération & sécurité',
           subtitle: 'Signalement, masquage, blocages et RLS Supabase.',
@@ -636,6 +851,55 @@ class SocialSidebarSection extends StatelessWidget {
           Expanded(child: Text(text, style: context.textStyles.bodySmall)),
         ],
       ),
+    );
+  }
+}
+
+// ============================================================
+// Widget d'upload (réutilisable)
+// ============================================================
+class SocialUploadButton extends StatelessWidget {
+  const SocialUploadButton({
+    super.key,
+    required this.label,
+    required this.onUpload,
+    this.icon = Icons.upload_file,
+    this.fileType = FileType.media,
+    this.allowedExtensions,
+  });
+
+  final String label;
+  final Future<void> Function(File file) onUpload;
+  final IconData icon;
+  final FileType fileType;
+  final List<String>? allowedExtensions;
+
+  @override
+  Widget build(BuildContext context) {
+    return FilledButton.icon(
+      onPressed: () async {
+        final result = await FilePicker.platform.pickFiles(
+          type: fileType,
+          allowedExtensions: allowedExtensions,
+          withData: true,
+        );
+        if (result == null || result.files.isEmpty) return;
+        final file = File(result.files.single.path!);
+        try {
+          await onUpload(file);
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('$label uploadé avec succès')),
+          );
+        } catch (e) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Erreur: $e')),
+          );
+        }
+      },
+      icon: Icon(icon),
+      label: Text(label),
     );
   }
 }
