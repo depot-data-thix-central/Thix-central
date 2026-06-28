@@ -9,22 +9,9 @@ import 'package:thix_central/health/thix_role_controller.dart';
 import 'package:thix_central/health/thix_ui_feedback.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/nav.dart';
+import 'package:thix_central/pages/health/health_dependencies.dart';
 import 'package:thix_central/pages/health/health_role_workspaces.dart';
 import 'package:thix_central/theme.dart';
-import 'package:permission_handler/permission_handler.dart';
-
-// ============================================================
-// 1. PROVIDERS (injection des dépendances)
-// ============================================================
-
-final patientRepositoryProvider = Provider((ref) => PatientRepository());
-final symptomRepositoryProvider = Provider((ref) => SymptomRepository());
-final constantRepositoryProvider = Provider((ref) => ConstantRepository());
-final appointmentRepositoryProvider = Provider((ref) => AppointmentRepository());
-final medicationRepositoryProvider = Provider((ref) => MedicationRepository());
-final openAIServiceProvider = Provider((ref) => OpenAIService());
-final storageServiceProvider = Provider((ref) => StorageService());
-final notificationServiceProvider = Provider((ref) => NotificationService());
 
 // ============================================================
 // 2. PAGE PRINCIPALE
@@ -57,23 +44,18 @@ class _ThixHealthDashboardPageState extends ConsumerState<ThixHealthDashboardPag
   }
 
   Future<void> _requestPermissions() async {
-    final statuses = await [
-      Permission.notification,
-      Permission.location,
-      Permission.camera,
-      Permission.storage,
-    ].request();
-    setState(() {
-      _permissions = {
-        'notifications': statuses[Permission.notification]?.isGranted ?? false,
-        'location': statuses[Permission.location]?.isGranted ?? false,
-        'camera': statuses[Permission.camera]?.isGranted ?? false,
-        'storage': statuses[Permission.storage]?.isGranted ?? false,
-      };
-    });
-    final prefs = await SharedPreferences.getInstance();
-    for (final entry in _permissions.entries) {
-      await prefs.setBool('health_perm_${entry.key}', entry.value);
+    // permission_handler is not included in this project.
+    // We keep the permission UX by restoring saved toggles (local-only).
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final next = <String, bool>{};
+      for (final key in _permissionKeys) {
+        next[key] = prefs.getBool('health_perm_$key') ?? false;
+      }
+      if (!mounted) return;
+      setState(() => _permissions = next);
+    } catch (e) {
+      debugPrint('Failed to load permissions: $e');
     }
   }
 
@@ -104,28 +86,20 @@ class _ThixHealthDashboardPageState extends ConsumerState<ThixHealthDashboardPag
   }
 
   Future<void> _togglePermission(String key, bool value) async {
-    PermissionStatus status;
-    switch (key) {
-      case 'notifications':
-        status = await Permission.notification.request();
-        break;
-      case 'location':
-        status = await Permission.location.request();
-        break;
-      case 'camera':
-        status = await Permission.camera.request();
-        break;
-      case 'storage':
-        status = await Permission.storage.request();
-        break;
-      default:
-        return;
+    // Local-only toggle (persisted). If you later add a real permission plugin,
+    // you can replace this function without changing the UI.
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('health_perm_$key', value);
+      if (!mounted) return;
+      setState(() => _permissions = {..._permissions, key: value});
+      if (!mounted) return;
+      showThixFeatureReadySnackBar(context, value ? 'Permission activée' : 'Permission désactivée');
+    } catch (e) {
+      debugPrint('Failed to toggle permission ($key): $e');
+      if (!mounted) return;
+      showThixFeatureReadySnackBar(context, 'Impossible de modifier la permission');
     }
-    final granted = status.isGranted;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('health_perm_$key', granted);
-    if (!mounted) return;
-    setState(() => _permissions = {..._permissions, key: granted});
   }
 
   Future<void> _resetPassword() async {

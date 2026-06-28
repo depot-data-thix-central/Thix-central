@@ -5,13 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:thix_central/health/thix_role_controller.dart';
 import 'package:thix_central/health/thix_ui_feedback.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/nav.dart';
+import 'package:thix_central/pages/health/health_dependencies.dart';
 import 'package:thix_central/theme.dart';
-import 'package:jitsi_meet/jitsi_meet.dart';
-import 'package:thix_central/data/models/health/symptom_model.dart';
-import 'package:thix_central/data/models/health/constant_model.dart';
-import 'package:thix_central/data/models/hospital/medication_model.dart';
-import 'package:thix_central/data/models/hospital/appointment_model.dart';
 
 // ============================================================
 // 1. PROVIDERS DE DONNÉES (FutureProvider)
@@ -199,10 +196,10 @@ class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
     final newSymptom = SymptomModel(
       id: '',
       patientId: patientId,
-      nom: result['name'],
-      intensité: result['intensity'].toInt(),
+      name: (result['name'] ?? '').toString(),
+      intensity: (result['intensity'] as num?)?.toInt() ?? 0,
       date: DateTime.now(),
-      notes: result['notes'],
+      notes: (result['notes'] ?? '').toString(),
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -223,15 +220,15 @@ class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
       id: '',
       patientId: patientId,
       date: DateTime.now(),
-      tensionSystolic: result['systolic'],
-      tensionDiastolic: result['diastolic'],
-      glycemie: result['glycemia'],
-      poids: result['weight'],
+      tensionSystolic: (result['systolic'] as num?)?.toDouble(),
+      tensionDiastolic: (result['diastolic'] as num?)?.toDouble(),
+      glycemie: (result['glycemia'] as num?)?.toDouble(),
+      poids: (result['weight'] as num?)?.toDouble(),
       taille: null,
       heartRate: null,
       temperature: null,
       spo2: null,
-      notes: result['notes'],
+      notes: (result['notes'] ?? '').toString(),
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -258,7 +255,7 @@ class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
       date: DateTime.now(),
       time: '${DateTime.now().hour}:${DateTime.now().minute}',
       status: 'pending',
-      notes: result['notes'],
+      notes: (result['notes'] ?? '').toString(),
       createdAt: DateTime.now(),
       updatedAt: DateTime.now(),
     );
@@ -293,16 +290,49 @@ class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
   }
 
   Future<void> _startJitsiCall(AppointmentModel appt) async {
+    // Jitsi is not bundled in this project (missing dependency). Keep the UX
+    // functional with a graceful fallback.
     final room = appt.teleRoom ?? 'thix-${DateTime.now().millisecondsSinceEpoch}';
-    var options = JitsiMeetingOptions(room: room)
-      ..serverURL = 'https://meet.jit.si'
-      ..displayName = 'Patient THIX'
-      ..subject = 'Consultation avec ${appt.doctorName}';
-    try {
-      await JitsiMeet.joinMeeting(options);
-    } catch (e) {
-      showThixFeatureReadySnackBar(context, 'Erreur Jitsi: $e');
-    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.all(16),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: AppColors.cardBorder)),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [Icon(Icons.video_call_rounded, color: AppColors.primaryBlue), const SizedBox(width: 10), Expanded(child: Text('Téléconsultation', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900))), IconButton(onPressed: () => context.pop(), icon: const Icon(Icons.close_rounded))]),
+                const SizedBox(height: 10),
+                Text('Le module d’appel vidéo (Jitsi) n’est pas activé sur ce build.', style: context.textStyles.bodyMedium?.copyWith(color: AppColors.textSecondary)),
+                const SizedBox(height: 10),
+                Text('Salle : $room', style: context.textStyles.labelLarge?.copyWith(fontWeight: FontWeight.w800)),
+                const SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () {
+                          context.pop();
+                          showThixFeatureReadySnackBar(context, 'Ajoute Jitsi plus tard pour activer les appels');
+                        },
+                        icon: const Icon(Icons.info_outline_rounded),
+                        label: const Text('OK'),
+                      ),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _addDocument(BuildContext context, String patientId) async {
@@ -318,7 +348,7 @@ class _PatientWorkspaceState extends ConsumerState<PatientWorkspace> {
       builder: (_) => AlertDialog(
         title: const Text('Lien expirable'),
         content: Text(link),
-        actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('OK'))],
+        actions: [TextButton(onPressed: () => context.pop(), child: const Text('OK'))],
       ),
     );
   }
@@ -518,7 +548,7 @@ class _SymptomTile extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: AppColors.cardBorder)),
-      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.12), child: Text(symptom.intensité.toString(), style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: AppColors.primaryBlue))), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(symptom.nom, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), if (symptom.notes != null && symptom.notes!.isNotEmpty) Text(symptom.notes!, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
+      child: Row(children: [CircleAvatar(radius: 18, backgroundColor: AppColors.primaryBlue.withValues(alpha: 0.12), child: Text(symptom.intensity.toString(), style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900, color: AppColors.primaryBlue))), const SizedBox(width: 10), Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(symptom.name, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w800)), if (symptom.notes != null && symptom.notes!.isNotEmpty) Text(symptom.notes!, style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary))]))]),
     );
   }
 }
