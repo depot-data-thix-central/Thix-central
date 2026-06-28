@@ -37,11 +37,10 @@ class ThixEventsRepository implements EventsRepository {
           .whereType<Map>()
           .map((row) => ThixEvent.fromJson(row.cast<String, dynamic>()))
           .toList();
-      if (events.isEmpty) return _snapshot;
 
       final userId = client.auth.currentUser?.id;
-      var favoriteIds = _snapshot.favoriteEventIds;
-      var bookings = _snapshot.bookings;
+      var favoriteIds = <String>{};
+      var bookings = <EventTicketBooking>[];
 
       if (userId != null) {
         final favoriteRows = await client.from('thix_event_favorites').select('event_id').eq('user_id', userId);
@@ -191,7 +190,7 @@ class ThixEventsRepository implements EventsRepository {
     final now = DateTime.utc(2027, 7, 1, 10);
     final events = <ThixEvent>[
       ThixEvent(
-        id: 'evt-tayc-dakar',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a101',
         title: 'TAYC en concert',
         summary: 'Une grande scène afro-love avec show live, zone VIP et accueil premium.',
         description: 'Une expérience concert pensée pour le grand public et les partenaires: accès standard, zone VIP, accueil digitalisé, check-in rapide et notifications en temps réel.',
@@ -217,7 +216,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 10)),
       ),
       ThixEvent(
-        id: 'evt-africa-business',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a102',
         title: 'Africa Business Summit',
         summary: 'Conférences stratégiques, networking B2B et sessions investisseurs.',
         description: 'Un sommet orienté décideurs avec agenda multi-salles, badges scannables, contrôle d’accès et réservations corporate.',
@@ -241,7 +240,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 8)),
       ),
       ThixEvent(
-        id: 'evt-douanes-jaraaf',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a103',
         title: 'AS Douanes vs Jaraaf',
         summary: 'Match premium avec billets standard, tribune et loge entreprise.',
         description: 'Billetterie sportive optimisée avec quota de sièges, alertes de disponibilité et accès rapide au stade.',
@@ -265,7 +264,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 6)),
       ),
       ThixEvent(
-        id: 'evt-afro-vibes',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a104',
         title: 'Afro Vibes Festival',
         summary: 'Festival outdoor avec food court, DJ sets et pass multi-jours.',
         description: 'Gestion de festival avec plusieurs zones, capacité live, favoris et billets QR par journée.',
@@ -289,7 +288,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 14)),
       ),
       ThixEvent(
-        id: 'evt-rire-continent',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a105',
         title: 'Le Rire du Continent',
         summary: 'Stand-up panafricain avec placement numéroté et zone photo.',
         description: 'Spectacle premium pensé pour une expérience fluide: réservations instantanées, ticket QR et assistance sur site.',
@@ -313,7 +312,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 4)),
       ),
       ThixEvent(
-        id: 'evt-salon-auto',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a106',
         title: 'Salon International de l’Auto',
         summary: 'Exposition, essais sur place et networking constructeurs.',
         description: 'Un salon B2C/B2B prêt pour la production avec réservations multi-pass, sessions partenaires et suivi visiteurs.',
@@ -336,7 +335,7 @@ class ThixEventsRepository implements EventsRepository {
         createdAt: now.subtract(const Duration(days: 2)),
       ),
       ThixEvent(
-        id: 'evt-thix-builders',
+        id: '77b0c4f1-7baf-4c19-a55b-6b3260f4a107',
         title: 'THIX Builders Meetup',
         summary: 'Rencontre gratuite produit/tech avec panel founders et démos live.',
         description: 'Format networking agile avec inscription gratuite, jauge limitée et liste d’attente automatisable côté backend.',
@@ -363,7 +362,7 @@ class ThixEventsRepository implements EventsRepository {
     final bookings = <EventTicketBooking>[
       EventTicketBooking(
         id: 'booking-seed-1',
-        eventId: 'evt-thix-builders',
+        eventId: '77b0c4f1-7baf-4c19-a55b-6b3260f4a107',
         eventTitle: 'THIX Builders Meetup',
         eventDate: now.add(const Duration(days: 3, hours: 18)),
         eventVenue: 'Plateau Hub',
@@ -373,7 +372,7 @@ class ThixEventsRepository implements EventsRepository {
         currency: 'XOF',
         status: EventTicketStatus.confirmed,
         ticketCode: 'THX-202707-1201',
-        qrPayload: 'thix-event:evt-thix-builders:seed',
+        qrPayload: 'thix-event:77b0c4f1-7baf-4c19-a55b-6b3260f4a107:seed',
         createdAt: now.subtract(const Duration(hours: 5)),
         attendeeName: 'Vous',
       ),
@@ -382,7 +381,7 @@ class ThixEventsRepository implements EventsRepository {
     return EventModuleSnapshot(
       events: events,
       bookings: bookings,
-      favoriteEventIds: {'evt-tayc-dakar', 'evt-thix-builders'},
+      favoriteEventIds: {'77b0c4f1-7baf-4c19-a55b-6b3260f4a101', '77b0c4f1-7baf-4c19-a55b-6b3260f4a107'},
     );
   }
 }
