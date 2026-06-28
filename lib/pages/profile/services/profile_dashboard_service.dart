@@ -14,6 +14,7 @@ class ProfileDashboardService {
     return uid;
   }
 
+  // ----- Profil général -----
   Future<ProfileDetailsModel?> getMyDetails() async {
     final uid = _requireUid();
     try {
@@ -41,6 +42,7 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Contacts d'urgence -----
   Future<List<EmergencyContactModel>> listMyEmergencyContacts() async {
     final uid = _requireUid();
     try {
@@ -79,6 +81,7 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Expériences -----
   Future<List<ProfileExperienceModel>> listMyExperiences() async {
     final uid = _requireUid();
     try {
@@ -109,6 +112,7 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Formations -----
   Future<List<ProfileEducationModel>> listMyEducation() async {
     final uid = _requireUid();
     try {
@@ -139,6 +143,7 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Compétences -----
   Future<List<ProfileSkillModel>> listMySkills() async {
     final uid = _requireUid();
     try {
@@ -169,6 +174,7 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Langues -----
   Future<List<ProfileLanguageModel>> listMyLanguages() async {
     final uid = _requireUid();
     try {
@@ -199,11 +205,14 @@ class ProfileDashboardService {
     }
   }
 
+  // ----- Documents -----
   Future<List<ProfileDocumentModel>> listMyDocuments({String? docType}) async {
     final uid = _requireUid();
     try {
       var query = _client.from('profile_documents').select('*').eq('user_id', uid);
-      if (docType != null && docType.trim().isNotEmpty) query = query.eq('doc_type', docType.trim());
+      if (docType != null && docType.trim().isNotEmpty) {
+        query = query.eq('doc_type', docType.trim());
+      }
       final rows = await query.order('created_at', ascending: false);
       return rows.map<ProfileDocumentModel>((e) => ProfileDocumentModel.fromJson(e)).toList(growable: false);
     } catch (e) {
@@ -238,36 +247,7 @@ class ProfileDashboardService {
     }
   }
 
-  Future<List<ProfileTransactionModel>> listMyTransactions() async {
-    final uid = _requireUid();
-    try {
-      final rows = await _client.from('profile_transactions').select('*').eq('user_id', uid).order('created_at', ascending: false);
-      return rows.map<ProfileTransactionModel>((e) => ProfileTransactionModel.fromJson(e)).toList(growable: false);
-    } catch (e) {
-      debugPrint('listMyTransactions failed: $e');
-      return const [];
-    }
-  }
-
-  Future<ProfileTransactionModel> createTransaction({required String type, required double amountUsd, String method = 'SIMULATED', String status = 'success', Map<String, dynamic>? metadata}) async {
-    final uid = _requireUid();
-    final payload = <String, dynamic>{
-      'user_id': uid,
-      'txn_type': type,
-      'amount_usd': amountUsd,
-      'method': method,
-      'status': status,
-      if (metadata != null) 'metadata': metadata,
-    };
-    try {
-      final row = await _client.from('profile_transactions').insert(payload).select('*').single();
-      return ProfileTransactionModel.fromJson(row);
-    } catch (e) {
-      debugPrint('createTransaction failed: $e');
-      rethrow;
-    }
-  }
-
+  // ----- Sécurité -----
   Future<ProfileSecuritySettingsModel?> getMySecuritySettings() async {
     final uid = _requireUid();
     try {
@@ -299,7 +279,11 @@ class ProfileDashboardService {
   Future<void> logSecurityEvent(String eventType, {Map<String, dynamic>? details}) async {
     final uid = _requireUid();
     try {
-      await _client.from('profile_security_events').insert({'user_id': uid, 'event_type': eventType, if (details != null) 'details': details});
+      await _client.from('profile_security_events').insert({
+        'user_id': uid,
+        'event_type': eventType,
+        if (details != null) 'details': details,
+      });
     } catch (e) {
       debugPrint('logSecurityEvent failed (ignored): $e');
     }
@@ -308,7 +292,11 @@ class ProfileDashboardService {
   Future<List<ProfileSecurityEventModel>> listMySecurityEvents({int limit = 60}) async {
     final uid = _requireUid();
     try {
-      final rows = await _client.from('profile_security_events').select('*').eq('user_id', uid).order('created_at', ascending: false).limit(limit);
+      final rows = await _client.from('profile_security_events')
+          .select('*')
+          .eq('user_id', uid)
+          .order('created_at', ascending: false)
+          .limit(limit);
       return rows.map<ProfileSecurityEventModel>((e) => ProfileSecurityEventModel.fromJson(e)).toList(growable: false);
     } catch (e) {
       debugPrint('listMySecurityEvents failed: $e');
