@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:thix_central/theme.dart';
 import '../models/chat_models.dart';
 import '../providers/chat_providers.dart';
-import '../services/chat_service.dart';
 import '../widgets/message_widgets.dart';
 
 class ConversationDetailPage extends ConsumerStatefulWidget {
@@ -134,7 +133,7 @@ class _ConversationDetailPageState extends ConsumerState<ConversationDetailPage>
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final message = messages[index];
-                    final isOwn = message.senderId == ref.read(chatServiceProvider)._client.auth.currentUser?.id;
+                    final isOwn = message.senderId == ref.read(chatServiceProvider).currentUserId;
 
                     return ref.watch(reactionsProvider(message.id)).when(
                       data: (reactions) => MessageBubble(
