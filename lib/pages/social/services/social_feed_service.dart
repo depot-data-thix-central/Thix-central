@@ -2,20 +2,35 @@ import 'dart:math' as math;
 
 import 'package:thix_central/pages/social/models/social_models.dart';
 
+/// Service utilitaire pour le fil d'actualité social.
+/// Gère l'extraction de hashtags/mentions, le tri des posts et le calcul du score "smart".
 class SocialFeedService {
   const SocialFeedService();
 
   static final RegExp _hashtagRegExp = RegExp(r'(?:^|\s)#([A-Za-z0-9_]+)');
   static final RegExp _mentionRegExp = RegExp(r'(?:^|\s)@([A-Za-z0-9_.]+)');
 
+  /// Extrait tous les hashtags uniques d'un texte (insensibles à la casse).
   List<String> extractHashtags(String input) {
-    return _hashtagRegExp.allMatches(input).map((match) => match.group(1)!.toLowerCase()).toSet().toList()..sort();
+    return _hashtagRegExp
+        .allMatches(input)
+        .map((match) => match.group(1)!.toLowerCase())
+        .toSet()
+        .toList()
+      ..sort();
   }
 
+  /// Extrait tous les mentions uniques d'un texte (insensibles à la casse).
   List<String> extractMentions(String input) {
-    return _mentionRegExp.allMatches(input).map((match) => match.group(1)!.toLowerCase()).toSet().toList()..sort();
+    return _mentionRegExp
+        .allMatches(input)
+        .map((match) => match.group(1)!.toLowerCase())
+        .toSet()
+        .toList()
+      ..sort();
   }
 
+  /// Vérifie si un post correspond à une requête de recherche.
   bool matchesQuery(SocialPost post, String query) {
     final normalized = query.trim().toLowerCase();
     if (normalized.isEmpty) return true;
@@ -27,9 +42,11 @@ class SocialFeedService {
         (post.communityName?.toLowerCase().contains(normalized) ?? false);
   }
 
+  /// Trie les posts selon le mode spécifié (récent, populaire, ou "smart").
   List<SocialPost> sortPosts(List<SocialPost> posts, SocialFeedSort sort) {
     final sorted = [...posts];
     sorted.sort((left, right) {
+      // Les posts épinglés passent en premier
       if (left.isPinned != right.isPinned) {
         return left.isPinned ? -1 : 1;
       }
@@ -49,6 +66,8 @@ class SocialFeedService {
     return sorted;
   }
 
+  /// Calcule un score "smart" pour un post, combinant engagement, fraîcheur,
+  /// format, médias, connexions, etc.
   double buildSmartScore(SocialPost post) {
     final ageHours = math.max(1, DateTime.now().difference(post.createdAt).inHours);
     final freshnessBoost = 120 / ageHours;
@@ -67,6 +86,8 @@ class SocialFeedService {
     return pinnedBoost + post.engagementScore + freshnessBoost + connectionBoost + mediaBoost + formatBoost;
   }
 
+  /// Applique les données du composeur (extraction, poll, challenge, etc.)
+  /// sur un post de base et retourne le post enrichi.
   SocialPost applyComposerData({
     required SocialPost base,
     required SocialComposerInput input,
