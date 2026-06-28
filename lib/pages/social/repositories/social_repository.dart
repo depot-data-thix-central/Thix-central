@@ -39,15 +39,37 @@ class ThixSocialRepository implements SocialRepository {
       return _snapshot;
     }
     try {
-      final rows = await client.from('social_posts').select('*').order('created_at', ascending: false).limit(20);
+      final currentUserId = client.auth.currentUser?.id;
+
+      final rows = await client.from('social_posts').select('*').order('created_at', ascending: false).limit(30);
       final posts = (rows as List)
-          .whereType<Map>()
-          .map((row) => SocialPost.fromJson(row.cast<String, dynamic>()))
+          .map(_asJsonMap)
+          .whereType<Map<String, dynamic>>()
+          .map(SocialPost.fromJson)
           .toList();
-      if (posts.isEmpty) {
-        return _snapshot;
+
+      if (posts.isEmpty) return _snapshot;
+
+      final postIds = posts.map((post) => post.id).toList();
+      final likedIds = <String>{};
+      if (currentUserId != null) {
+        try {
+          final likeRows = await client.from('social_post_likes').select('post_id').eq('user_id', currentUserId).inFilter('post_id', postIds);
+          likedIds.addAll((likeRows as List).whereType<Map>().map((row) => (row['post_id'] ?? '').toString()));
+        } catch (error) {
+          debugPrint('social likes preload failed: $error');
+        }
       }
-      _cache = _snapshot.copyWith(feed: posts);
+
+      final enriched = posts
+          .map(
+            (post) => post.copyWith(
+              isLiked: likedIds.contains(post.id),
+            ),
+          )
+          .toList();
+
+      _cache = _snapshot.copyWith(feed: enriched);
       return _cache!;
     } catch (error) {
       debugPrint('social load fallback: $error');
@@ -97,42 +119,102 @@ class ThixSocialRepository implements SocialRepository {
   @override
   Future<SocialPost> toggleLike(String postId) async {
     final target = _snapshot.feed.firstWhere((post) => post.id == postId);
-    final updated = target.copyWith(
+    final client = SupabaseClientProvider.clientOrNull;
+    final currentUserId = client?.auth.currentUser?.id;
+
+    final optimistic = target.copyWith(
       isLiked: !target.isLiked,
       likeCount: target.isLiked ? max(0, target.likeCount - 1) : target.likeCount + 1,
     );
-    _replacePost(updated);
-    return updated;
+    _replacePost(optimistic);
+
+    if (client == null || currentUserId == null) return optimistic;
+    try {
+      if (optimistic.isLiked) {
+        await client.from('social_post_likes').insert({'post_id': postId, 'user_id': currentUserId});
+      } else {
+        await client.from('social_post_likes').delete().eq('post_id', postId).eq('user_id', currentUserId);
+      }
+      final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
+      final refreshedJson = _asJsonMap(refreshed);
+      if (refreshedJson != null) {
+        final updated = SocialPost.fromJson(refreshedJson).copyWith(isLiked: optimistic.isLiked);
+        _replacePost(updated);
+        return updated;
+      }
+    } catch (error) {
+      debugPrint('social like failed: $error');
+    }
+    return optimistic;
   }
 
   @override
   Future<SocialPost> toggleBookmark(String postId) async {
     final target = _snapshot.feed.firstWhere((post) => post.id == postId);
-    final updated = target.copyWith(isBookmarked: !target.isBookmarked);
-    _replacePost(updated);
-    return updated;
+    final client = SupabaseClientProvider.clientOrNull;
+    final currentUserId = client?.auth.currentUser?.id;
+    final optimistic = target.copyWith(isBookmarked: !target.isBookmarked);
+    _replacePost(optimistic);
+
+    if (client == null || currentUserId == null) return optimistic;
+    try {
+      if (optimistic.isBookmarked) {
+        await client.from('social_post_bookmarks').insert({'post_id': postId, 'user_id': currentUserId});
+      } else {
+        await client.from('social_post_bookmarks').delete().eq('post_id', postId).eq('user_id', currentUserId);
+      }
+    } catch (error) {
+      debugPrint('social bookmark failed: $error');
+    }
+    return optimistic;
   }
 
   @override
   Future<SocialPost> addComment(String postId, String text) async {
     final target = _snapshot.feed.firstWhere((post) => post.id == postId);
     final now = DateTime.now();
-    final comment = SocialComment(
-      id: 'comment-${now.microsecondsSinceEpoch}',
-      author: const SocialAuthor(
-        id: 'local-user',
-        name: 'Vous',
-        role: 'Membre THIX CENTRAL',
-        isVerified: true,
-      ),
-      text: text.trim(),
-      createdAt: now,
+    final client = SupabaseClientProvider.clientOrNull;
+    final currentUser = client?.auth.currentUser;
+    final author = SocialAuthor(
+      id: currentUser?.id ?? 'local-user',
+      name: currentUser?.userMetadata?['display_name']?.toString() ?? 'Vous',
+      role: currentUser?.userMetadata?['headline']?.toString() ?? 'Membre THIX CENTRAL',
+      isVerified: true,
+      mutualConnections: 0,
     );
+    final comment = SocialComment(id: 'comment-${now.microsecondsSinceEpoch}', author: author, text: text.trim(), createdAt: now);
+
     final updated = target.copyWith(
       comments: [...target.comments, comment],
       commentCount: target.commentCount + 1,
     );
     _replacePost(updated);
+
+    if (client != null && currentUser != null) {
+      try {
+        await client.from('social_post_comments').insert({
+          'post_id': postId,
+          'author_id': author.id,
+          'author_name': author.name,
+          'author_role': author.role,
+          'author_avatar_url': author.avatarUrl,
+          'text': comment.text,
+        });
+        final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
+        final refreshedJson = _asJsonMap(refreshed);
+        if (refreshedJson != null) {
+          final next = SocialPost.fromJson(refreshedJson).copyWith(
+            isLiked: updated.isLiked,
+            isBookmarked: updated.isBookmarked,
+            comments: updated.comments,
+          );
+          _replacePost(next);
+          return next;
+        }
+      } catch (error) {
+        debugPrint('social comment failed: $error');
+      }
+    }
     return updated;
   }
 
@@ -152,6 +234,7 @@ class ThixSocialRepository implements SocialRepository {
 
   @override
   Future<List<SocialConnectionSuggestion>> toggleConnection(String suggestionId) async {
+    // Local-first behaviour (and used as fallback if Supabase isn't ready).
     final updated = _snapshot.suggestions.map((suggestion) {
       if (suggestion.id != suggestionId) return suggestion;
       if (suggestion.isBlocked) return suggestion.copyWith(isBlocked: false);
@@ -162,6 +245,26 @@ class ThixSocialRepository implements SocialRepository {
       return suggestion.copyWith(isRequested: true);
     }).toList();
     _cache = _snapshot.copyWith(suggestions: updated);
+
+    final client = SupabaseClientProvider.clientOrNull;
+    final currentUserId = client?.auth.currentUser?.id;
+    if (client != null && currentUserId != null) {
+      try {
+        final target = updated.firstWhere((item) => item.id == suggestionId);
+        final status = target.isConnected
+            ? 'accepted'
+            : target.isRequested
+                ? 'requested'
+                : 'none';
+        if (status == 'none') {
+          await client.from('social_connections').delete().eq('requester_id', currentUserId).eq('addressee_id', suggestionId);
+        } else {
+          await client.from('social_connections').upsert({'requester_id': currentUserId, 'addressee_id': suggestionId, 'status': status});
+        }
+      } catch (error) {
+        debugPrint('social connection sync failed: $error');
+      }
+    }
     return updated;
   }
 
@@ -391,5 +494,19 @@ class ThixSocialRepository implements SocialRepository {
       analytics: const SocialAnalyticsSnapshot(profileViews: 1248, contentViews: 8921, likes: 527, comments: 143),
       moderation: const SocialModerationSnapshot(hiddenPosts: 3, reportedPosts: 1, blockedUsers: 2, rlsReady: true),
     );
+  }
+
+  static Map<String, dynamic>? _asJsonMap(dynamic value) {
+    if (value == null) return null;
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) {
+      try {
+        return Map<String, dynamic>.from(value);
+      } catch (error) {
+        debugPrint('social_repository: invalid map payload: $error');
+        return null;
+      }
+    }
+    return null;
   }
 }

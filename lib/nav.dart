@@ -26,11 +26,13 @@ import 'package:thix_central/pages/health/health_home_page.dart';
 import 'package:thix_central/pages/jobs/jobs_home_page.dart';
 import 'package:thix_central/pages/learning/learning_home_page.dart';
 import 'package:thix_central/pages/social/social_home_page.dart';
+import 'package:thix_central/pages/system/init_error_page.dart';
 
 class AppRouter {
   static final GoRouter router = GoRouter(
     initialLocation: AppRoutes.splash,
     routes: [
+      GoRoute(path: AppRoutes.initError, name: 'init_error', pageBuilder: (context, state) => const NoTransitionPage(child: InitErrorPage())),
       GoRoute(
         path: AppRoutes.splash,
         name: 'splash',
@@ -146,6 +148,7 @@ class AppRoutes {
   static const String profile = '/profile';
   static const String market = '/market';
   static const String splash = '/splash';
+  static const String initError = '/init-error';
   static const String login = '/auth/login';
   static const String signup = '/auth/signup';
   static const String otpVerify = '/auth/verify';

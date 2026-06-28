@@ -20,8 +20,18 @@ Future<void> main() async {
   //
   // We initialize Supabase asynchronously after runApp, and the splash screen
   // will await it (with a timeout) before deciding where to route.
-  unawaited(SupabaseClientProvider.initializeFromEnv());
+  // Fire-and-forget with a hard timeout so a slow network cannot keep the
+  // app in the browser "Loading..." state.
+  unawaited(_safeInitSupabase());
   runApp(const MyApp());
+}
+
+Future<void> _safeInitSupabase() async {
+  try {
+    await SupabaseClientProvider.initializeFromEnv().timeout(const Duration(seconds: 8));
+  } catch (e) {
+    debugPrint('Supabase init (main) timeout/failure: $e');
+  }
 }
 
 class MyApp extends StatelessWidget {

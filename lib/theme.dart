@@ -93,6 +93,7 @@ class AppColors {
   static const Color darkNavy = Color(0xFF02134F);
   static const Color white = Color(0xFFFFFFFF);
   static const Color lightGrayBackground = Color(0xFFF5F6FA);
+  static const Color textPrimary = Color(0xFF0B1028);
   static const Color textSecondary = Color(0xFF7B8190);
   static const Color cardBorder = Color(0xFFE9ECF3);
   static const Color goldBadge = Color(0xFFF7C948);

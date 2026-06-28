@@ -51,10 +51,17 @@ class _ThixSplashPageState extends State<ThixSplashPage> with SingleTickerProvid
     // This prevents routing decisions from happening while init is still in-flight.
     if (!SupabaseClientProvider.isInitialized) {
       try {
-        await SupabaseClientProvider.initializeFromEnv().timeout(const Duration(seconds: 3));
+        await SupabaseClientProvider.initializeFromEnv().timeout(const Duration(seconds: 6));
       } catch (e) {
         debugPrint('Splash supabase init timeout/failure: $e');
       }
+    }
+
+    if (!SupabaseClientProvider.isInitialized) {
+      // Supabase is still unavailable: show an explicit error page instead of
+      // keeping the user on an indefinite loading state.
+      context.go('/init-error');
+      return;
     }
 
     final client = SupabaseClientProvider.clientOrNull;
