@@ -18,13 +18,7 @@ class _AppShellState extends State<AppShell> {
     return Scaffold(
       body: SafeArea(
         top: false,
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 220),
-          switchInCurve: Curves.easeOutCubic,
-          switchOutCurve: Curves.easeInCubic,
-          transitionBuilder: (child, animation) => FadeTransition(opacity: animation, child: child),
-          child: KeyedSubtree(key: ValueKey(widget.navigationShell.currentIndex), child: widget.navigationShell),
-        ),
+        child: widget.navigationShell,
       ),
       bottomNavigationBar: _ThixBottomNav(
         currentIndex: widget.navigationShell.currentIndex,

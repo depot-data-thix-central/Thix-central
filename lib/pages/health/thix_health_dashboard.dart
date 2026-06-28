@@ -136,7 +136,11 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        _DashboardTopBar(greetingName: greetingName, role: role),
+                        _DashboardTopBar(
+                          greetingName: greetingName,
+                          role: role,
+                          onBack: () => context.go(AppRoutes.home),
+                        ),
                         const SizedBox(height: 18),
                         _RoleSwitcher(controller: _roleController),
                         const SizedBox(height: 14),
@@ -147,13 +151,7 @@ class _ThixHealthDashboardPageState extends State<ThixHealthDashboardPage> {
                           onTogglePermission: _togglePermission,
                           onResetPassword: _resetPassword,
                           onSignOut: _signOut,
-                          onBack: () {
-                            if (context.canPop()) {
-                              context.pop();
-                            } else {
-                              context.go(AppRoutes.home);
-                            }
-                          },
+                          onBack: () => context.go(AppRoutes.home),
                           onShowOnboarding: () => _showOnboarding(force: true),
                           hasManualSelection: _roleController.hasManualSelection,
                           verifiedRole: _roleController.verifiedRole,
@@ -217,24 +215,29 @@ String _displayNameFromEmail(String? email, ThixRole role) {
 }
 
 class _DashboardTopBar extends StatelessWidget {
-  const _DashboardTopBar({required this.greetingName, required this.role});
+  const _DashboardTopBar({required this.greetingName, required this.role, required this.onBack});
 
   final String greetingName;
   final ThixRole role;
+  final VoidCallback onBack;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: const [AppShadows.secondary],
+        InkWell(
+          onTap: onBack,
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: const [AppShadows.secondary],
+            ),
+            child: const Icon(Icons.arrow_back_rounded, color: AppColors.darkNavy),
           ),
-          child: const Icon(Icons.menu_rounded, color: AppColors.darkNavy),
         ),
         const SizedBox(width: 14),
         Expanded(
@@ -632,7 +635,7 @@ class _RoleModules extends StatelessWidget {
                     crossAxisCount: 2,
                     mainAxisSpacing: 12,
                     crossAxisSpacing: 12,
-                    childAspectRatio: 1.12,
+                    childAspectRatio: 0.95,
                   ),
                   itemBuilder: (context, index) => _FeatureCard(item: section.items[index]),
                 ),
@@ -655,7 +658,7 @@ class _FeatureCard extends StatelessWidget {
       onTap: () => _showInfo(context, item.title),
       borderRadius: BorderRadius.circular(24),
       child: Container(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.circular(24),
@@ -663,27 +666,26 @@ class _FeatureCard extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          mainAxisSize: MainAxisSize.max,
+          mainAxisAlignment: MainAxisAlignment.start,
           children: [
             CircleAvatar(
-              radius: 22,
+              radius: 20,
               backgroundColor: item.color.withValues(alpha: 0.10),
               child: Icon(item.icon, color: item.color),
             ),
-            Text(
-              item.title,
-              style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: AppColors.darkNavy),
+            const SizedBox(height: 8),
+            Text(item.title, style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: AppColors.darkNavy), maxLines: 2, overflow: TextOverflow.ellipsis),
+            const SizedBox(height: 6),
+            Expanded(
+              child: Text(
+                item.subtitle,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary, height: 1.25),
+              ),
             ),
-            Text(
-              item.subtitle,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: context.textStyles.bodySmall?.copyWith(color: AppColors.textSecondary, height: 1.35),
-            ),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Icon(Icons.arrow_forward_rounded, color: item.color, size: 20),
-            ),
+            Align(alignment: Alignment.centerRight, child: Icon(Icons.arrow_forward_rounded, color: item.color, size: 20)),
           ],
         ),
       ),

@@ -29,7 +29,13 @@ class _ThixIdentityCardPageState extends State<ThixIdentityCardPage> {
         title: Text('THIX ID', style: context.textStyles.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
         actions: [
           IconButton(
-            onPressed: () => context.pop(),
+            onPressed: () {
+              if (context.canPop()) {
+                context.pop();
+              } else {
+                context.go('/');
+              }
+            },
             icon: Icon(Icons.close, color: cs.onSurface),
             splashColor: Colors.transparent,
             highlightColor: Colors.transparent,
