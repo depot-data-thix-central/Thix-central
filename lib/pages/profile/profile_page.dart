@@ -1,11 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:thix_central/auth/services/thix_profile_service.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/pages/profile/models/profile_models.dart';
@@ -14,6 +17,9 @@ import 'package:thix_central/pages/profile/services/profile_pdf_service.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
+// ============================================================================
+// Page principale
+// ============================================================================
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
 
@@ -35,7 +41,6 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<List<ProfileSkillModel>>? _skillsFuture;
   Future<List<ProfileLanguageModel>>? _langsFuture;
   Future<List<ProfileDocumentModel>>? _docsFuture;
-  Future<List<ProfileTransactionModel>>? _txFuture;
   Future<ProfileSecuritySettingsModel?>? _secFuture;
   Future<List<ProfileSecurityEventModel>>? _secEventsFuture;
 
@@ -62,7 +67,6 @@ class _ProfilePageState extends State<ProfilePage> {
       _skillsFuture = _dashboardService.listMySkills();
       _langsFuture = _dashboardService.listMyLanguages();
       _docsFuture = _dashboardService.listMyDocuments();
-      _txFuture = _dashboardService.listMyTransactions();
       _secFuture = _dashboardService.getMySecuritySettings();
       _secEventsFuture = _dashboardService.listMySecurityEvents();
     });
@@ -86,144 +90,138 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
-    final displayEmail = user?.email ?? 'Invité';
-
-    if (user == null) {
-      return Scaffold(
-        appBar: ThixTopBar(
-          title: 'Profil',
-          subtitle: 'Connectez-vous pour continuer',
-          onMenuTap: () {},
-          trailing: IconButton(
-            onPressed: () => context.push('/auth/login?next=/profile'),
-            icon: Icon(Icons.login, color: cs.onSurface),
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-          ),
-        ),
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.lock_outline, size: 44, color: cs.onSurfaceVariant),
-              const SizedBox(height: 10),
-              Text('Connexion requise', style: context.textStyles.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
-              const SizedBox(height: 6),
-              Text('Accédez à votre THIX ID et à votre dashboard.', style: context.textStyles.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
-              const SizedBox(height: 14),
-              FilledButton.icon(
-                onPressed: () => context.push('/auth/login?next=/profile'),
-                icon: Icon(Icons.login, color: cs.onPrimary),
-                label: Text('Se connecter', style: TextStyle(color: cs.onPrimary)),
-              ),
-            ]),
-          ),
-        ),
+  // --- Upload réel de document ---
+  Future<void> _uploadDocument(String docType) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
       );
+      if (result == null || result.files.isEmpty) return;
+      final file = File(result.files.single.path!);
+      final fileName = result.files.single.name;
+
+      final supabase = SupabaseClientProvider.client;
+      final userId = supabase.auth.currentUser!.id;
+      final bucket = 'profile_docs';
+      final path = '$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
+      final response = await supabase.storage.from(bucket).upload(path, file);
+      if (response.error != null) throw Exception(response.error!.message);
+
+      final publicUrl = supabase.storage.from(bucket).getPublicUrl(path);
+
+      await _dashboardService.createDocument(
+        docType: docType,
+        label: fileName,
+        fileUrl: publicUrl,
+      );
+
+      await _safeLogEvent('document_uploaded', details: {'doc_type': docType, 'file': fileName});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Document "$fileName" uploadé avec succès')));
+      _refreshAll();
+    } catch (e) {
+      debugPrint('Upload failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur upload: $e')));
     }
-
-    return DefaultTabController(
-      length: 5,
-      child: Scaffold(
-        appBar: _ProfileTabbedTopBar(
-          title: 'Profil',
-          subtitle: displayEmail,
-          onMenuTap: () {},
-          trailing: IconButton(
-            onPressed: () => _showNotifications(context),
-            icon: Icon(Icons.notifications_none_rounded, color: cs.onSurface),
-            splashColor: Colors.transparent,
-            highlightColor: Colors.transparent,
-          ),
-          tabs: const [
-            Tab(text: 'Dashboard'),
-            Tab(text: 'Parcours'),
-            Tab(text: 'Docs'),
-            Tab(text: 'Paiements'),
-            Tab(text: 'Sécurité'),
-          ],
-        ),
-        floatingActionButton: _QuickFabRow(
-          onScan: () => context.push('/scan'),
-          onChat: () => context.push('/messages'),
-        ),
-        body: TabBarView(
-          children: [
-            _DashboardTab(
-              profileFuture: _profileFuture!,
-              detailsFuture: _detailsFuture!,
-              contactsFuture: _contactsFuture!,
-              expFuture: _expFuture!,
-              eduFuture: _eduFuture!,
-              skillsFuture: _skillsFuture!,
-              langsFuture: _langsFuture!,
-              onRefresh: _refreshAll,
-              onEditIdentity: _openEditIdentity,
-              onEditEmergency: _openEmergencyEditor,
-              onSharePublic: _sharePublicLink,
-              onShowQr: () => context.push('/thix-id/card'),
-              onLogout: _logout,
-            ),
-            _ParcoursTab(
-              detailsFuture: _detailsFuture!,
-              expFuture: _expFuture!,
-              eduFuture: _eduFuture!,
-              skillsFuture: _skillsFuture!,
-              langsFuture: _langsFuture!,
-              onRefresh: _refreshAll,
-              onEditVisibility: _openVisibilityEditor,
-              onAddExperience: () => _openExperienceEditor(),
-              onAddEducation: () => _openEducationEditor(),
-              onAddSkill: () => _openSkillEditor(),
-              onAddLanguage: () => _openLanguageEditor(),
-              onEditExperience: (m) => _openExperienceEditor(existing: m),
-              onEditEducation: (m) => _openEducationEditor(existing: m),
-              onEditSkill: (m) => _openSkillEditor(existing: m),
-              onEditLanguage: (m) => _openLanguageEditor(existing: m),
-              onDeleteExperience: _deleteExperience,
-              onDeleteEducation: _deleteEducation,
-              onDeleteSkill: _deleteSkill,
-              onDeleteLanguage: _deleteLanguage,
-            ),
-            _DocumentsTab(
-              docsFuture: _docsFuture!,
-              onRefresh: _refreshAll,
-              onUploadDoc: _simulateUploadDocument,
-              onDeleteDoc: _deleteDocument,
-            ),
-            _PaymentsTab(
-              profileFuture: _profileFuture!,
-              detailsFuture: _detailsFuture!,
-              txFuture: _txFuture!,
-              onRefresh: _refreshAll,
-              onActivate: _activateAccount,
-              onPrintReceipt: _printReceipt,
-              onPrintCv: _printDigitalCv,
-            ),
-            _SecurityTab(
-              secFuture: _secFuture!,
-              secEventsFuture: _secEventsFuture!,
-              onRefresh: _refreshAll,
-              onUpdateToggles: _updateSecurityToggles,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
-  Future<void> _sharePublicLink(Map<String, dynamic>? profile) async {
-    final thixId = (profile?['thix_id'] as String?) ?? 'THIX-PENDING';
-    final url = 'https://thix.app/u/$thixId';
-    await _safeLogEvent('share_public_link', details: {'thix_id': thixId});
-    if (!mounted) return;
-    await Share.share('Mon profil THIX: $url');
+  // --- Activation gratuite (sans paiement) ---
+  Future<void> _activateAccount(ProfileDetailsModel? details) async {
+    try {
+      final uid = SupabaseClientProvider.client.auth.currentUser!.id;
+      final patch = (details ?? ProfileDetailsModel(
+            userId: uid,
+            fullName: null,
+            bio: null,
+            phone: null,
+            address: null,
+            city: null,
+            nationality: null,
+            maritalStatus: null,
+            birthPlace: null,
+            fatherName: null,
+            motherName: null,
+            accountStatus: 'THIX-PENDING',
+            publicBio: true,
+            publicExperiences: true,
+            publicEducation: true,
+            publicSkills: true,
+            publicLanguages: true,
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ))
+          .copyWith(accountStatus: 'THIX-ACTIVE');
+
+      await _dashboardService.upsertMyDetails(patch);
+      await _safeLogEvent('account_activated');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Compte activé')));
+      _refreshAll();
+    } catch (e) {
+      debugPrint('activateAccount failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
   }
 
+  Future<void> _updateSecurityToggles({required bool biometricsEnabled, required bool twoFaEnabled}) async {
+    try {
+      if (biometricsEnabled) {
+        final can = await _localAuth.canCheckBiometrics;
+        final supported = await _localAuth.isDeviceSupported();
+        if (!can || !supported) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biométrie indisponible sur cet appareil')));
+          return;
+        }
+        final ok = await _localAuth.authenticate(
+          localizedReason: 'Activer la biométrie pour sécuriser votre dashboard',
+          options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
+        );
+        if (!ok) return;
+      }
+
+      await _dashboardService.upsertMySecuritySettings(biometricsEnabled: biometricsEnabled, twoFaEnabled: twoFaEnabled);
+      await _safeLogEvent('security_settings_updated', details: {'biometrics': biometricsEnabled, 'two_fa': twoFaEnabled});
+      _refreshAll();
+    } catch (e) {
+      debugPrint('updateSecurityToggles failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
+    }
+  }
+
+  // --- Export CV ---
+  Future<void> _printDigitalCv() async {
+    try {
+      final profile = await _profileFuture;
+      final details = await _detailsFuture;
+      final thixId = (profile?['thix_id'] as String?) ?? 'THIX-PENDING';
+      final name = (details?.fullName ?? profile?['display_name'] ?? SupabaseClientProvider.client.auth.currentUser?.email ?? 'THIX').toString();
+      final exps = await _expFuture!;
+      final edu = await _eduFuture!;
+      final skills = await _skillsFuture!;
+      final langs = await _langsFuture!;
+      await _safeLogEvent('export_cv_pdf');
+      await _pdf.printDigitalCv(
+        displayName: name,
+        thixId: thixId,
+        details: details,
+        experiences: exps,
+        education: edu,
+        skills: skills,
+        languages: langs,
+      );
+    } catch (e) {
+      debugPrint('printDigitalCv failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur PDF: $e')));
+    }
+  }
+
+  // --- Éditeurs (conservés) ---
   Future<void> _openEditIdentity(ProfileDetailsModel? existing) async {
     final result = await showModalBottomSheet<ProfileDetailsModel>(
       context: context,
@@ -412,127 +410,6 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _simulateUploadDocument(String docType) async {
-    // Upload réel (storage) à brancher plus tard. Ici on enregistre la métadonnée + on crée une transaction simulée.
-    try {
-      final txn = await _dashboardService.createTransaction(type: 'document_upload', amountUsd: 1.0, metadata: {'doc_type': docType});
-      await _dashboardService.createDocument(docType: docType, label: docType, fileUrl: 'simulated://upload/${txn.id}');
-      await _safeLogEvent('document_uploaded_simulated', details: {'doc_type': docType});
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Upload simulé (1 USD) enregistré')));
-      _refreshAll();
-    } catch (e) {
-      debugPrint('simulateUploadDocument failed: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-    }
-  }
-
-  Future<void> _activateAccount(ProfileDetailsModel? details) async {
-    try {
-      await _dashboardService.createTransaction(type: 'activation', amountUsd: 1.0);
-      final uid = SupabaseClientProvider.client.auth.currentUser!.id;
-      final patch = (details ?? ProfileDetailsModel(
-            userId: uid,
-            fullName: null,
-            bio: null,
-            phone: null,
-            address: null,
-            city: null,
-            nationality: null,
-            maritalStatus: null,
-            birthPlace: null,
-            fatherName: null,
-            motherName: null,
-            accountStatus: 'THIX-PENDING',
-            publicBio: true,
-            publicExperiences: true,
-            publicEducation: true,
-            publicSkills: true,
-            publicLanguages: true,
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ))
-          .copyWith(accountStatus: 'THIX-ACTIVE');
-
-      await _dashboardService.upsertMyDetails(patch);
-      await _safeLogEvent('account_activated');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Compte activé (simulé)')));
-      _refreshAll();
-    } catch (e) {
-      debugPrint('activateAccount failed: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-    }
-  }
-
-  Future<void> _updateSecurityToggles({required bool biometricsEnabled, required bool twoFaEnabled}) async {
-    try {
-      if (biometricsEnabled) {
-        final can = await _localAuth.canCheckBiometrics;
-        final supported = await _localAuth.isDeviceSupported();
-        if (!can || !supported) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Biométrie indisponible sur cet appareil')));
-          return;
-        }
-
-        final ok = await _localAuth.authenticate(
-          localizedReason: 'Activer la biométrie pour sécuriser votre dashboard',
-          options: const AuthenticationOptions(biometricOnly: true, stickyAuth: true),
-        );
-        if (!ok) return;
-      }
-
-      await _dashboardService.upsertMySecuritySettings(biometricsEnabled: biometricsEnabled, twoFaEnabled: twoFaEnabled);
-      await _safeLogEvent('security_settings_updated', details: {'biometrics': biometricsEnabled, 'two_fa': twoFaEnabled});
-      _refreshAll();
-    } catch (e) {
-      debugPrint('updateSecurityToggles failed: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur: $e')));
-    }
-  }
-
-  Future<void> _printDigitalCv(Map<String, dynamic>? profile, ProfileDetailsModel? details) async {
-    try {
-      final thixId = (profile?['thix_id'] as String?) ?? 'THIX-PENDING';
-      final name = (details?.fullName ?? profile?['display_name'] ?? SupabaseClientProvider.client.auth.currentUser?.email ?? 'THIX').toString();
-      final exps = await _expFuture!;
-      final edu = await _eduFuture!;
-      final skills = await _skillsFuture!;
-      final langs = await _langsFuture!;
-      await _safeLogEvent('export_cv_pdf');
-      await _pdf.printDigitalCv(
-        displayName: name,
-        thixId: thixId,
-        details: details,
-        experiences: exps,
-        education: edu,
-        skills: skills,
-        languages: langs,
-      );
-    } catch (e) {
-      debugPrint('printDigitalCv failed: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur PDF: $e')));
-    }
-  }
-
-  Future<void> _printReceipt(Map<String, dynamic>? profile, ProfileDetailsModel? details, ProfileTransactionModel txn) async {
-    try {
-      final thixId = (profile?['thix_id'] as String?) ?? 'THIX-PENDING';
-      final name = (details?.fullName ?? profile?['display_name'] ?? SupabaseClientProvider.client.auth.currentUser?.email ?? 'THIX').toString();
-      await _safeLogEvent('export_receipt_pdf', details: {'txn_id': txn.id});
-      await _pdf.printReceipt(displayName: name, thixId: thixId, txn: txn);
-    } catch (e) {
-      debugPrint('printReceipt failed: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Erreur PDF: $e')));
-    }
-  }
-
   void _showNotifications(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -541,8 +418,142 @@ class _ProfilePageState extends State<ProfilePage> {
       builder: (context) => const NotificationsSheet(),
     );
   }
+
+  Future<void> _sharePublicLink(Map<String, dynamic>? profile) async {
+    final thixId = (profile?['thix_id'] as String?) ?? 'THIX-PENDING';
+    final url = 'https://thix.app/u/$thixId';
+    await _safeLogEvent('share_public_link', details: {'thix_id': thixId});
+    if (!mounted) return;
+    await Share.share('Mon profil THIX: $url');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final user = SupabaseClientProvider.clientOrNull?.auth.currentUser;
+    final displayEmail = user?.email ?? 'Invité';
+
+    if (user == null) {
+      return Scaffold(
+        appBar: ThixTopBar(
+          title: 'Profil',
+          subtitle: 'Connectez-vous pour continuer',
+          onMenuTap: () {},
+          trailing: IconButton(
+            onPressed: () => context.push('/auth/login?next=/profile'),
+            icon: Icon(Icons.login, color: cs.onSurface),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.lock_outline, size: 44, color: cs.onSurfaceVariant),
+              const SizedBox(height: 10),
+              Text('Connexion requise', style: context.textStyles.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+              const SizedBox(height: 6),
+              Text('Accédez à votre THIX ID et à votre dashboard.', style: context.textStyles.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () => context.push('/auth/login?next=/profile'),
+                icon: Icon(Icons.login, color: cs.onPrimary),
+                label: Text('Se connecter', style: TextStyle(color: cs.onPrimary)),
+              ),
+            ]),
+          ),
+        ),
+      );
+    }
+
+    return DefaultTabController(
+      length: 4,
+      child: Scaffold(
+        appBar: _ProfileTabbedTopBar(
+          title: 'Profil',
+          subtitle: displayEmail,
+          onMenuTap: () {},
+          trailing: IconButton(
+            onPressed: () => _showNotifications(context),
+            icon: Icon(Icons.notifications_none_rounded, color: cs.onSurface),
+            splashColor: Colors.transparent,
+            highlightColor: Colors.transparent,
+          ),
+          tabs: const [
+            Tab(text: 'Dashboard'),
+            Tab(text: 'Parcours'),
+            Tab(text: 'Docs'),
+            Tab(text: 'Sécurité'),
+          ],
+        ),
+        floatingActionButton: _QuickFabRow(
+          onScan: () => context.push('/scan'),
+          onChat: () => context.push('/messages'),
+        ),
+        body: TabBarView(
+          children: [
+            _DashboardTab(
+              profileFuture: _profileFuture!,
+              detailsFuture: _detailsFuture!,
+              contactsFuture: _contactsFuture!,
+              expFuture: _expFuture!,
+              eduFuture: _eduFuture!,
+              skillsFuture: _skillsFuture!,
+              langsFuture: _langsFuture!,
+              onRefresh: _refreshAll,
+              onEditIdentity: _openEditIdentity,
+              onEditEmergency: _openEmergencyEditor,
+              onSharePublic: _sharePublicLink,
+              onShowQr: () => context.push('/thix-id/card'),
+              onLogout: _logout,
+              onPrintCv: _printDigitalCv,
+            ),
+            _ParcoursTab(
+              detailsFuture: _detailsFuture!,
+              expFuture: _expFuture!,
+              eduFuture: _eduFuture!,
+              skillsFuture: _skillsFuture!,
+              langsFuture: _langsFuture!,
+              onRefresh: _refreshAll,
+              onEditVisibility: _openVisibilityEditor,
+              onAddExperience: () => _openExperienceEditor(),
+              onAddEducation: () => _openEducationEditor(),
+              onAddSkill: () => _openSkillEditor(),
+              onAddLanguage: () => _openLanguageEditor(),
+              onEditExperience: (m) => _openExperienceEditor(existing: m),
+              onEditEducation: (m) => _openEducationEditor(existing: m),
+              onEditSkill: (m) => _openSkillEditor(existing: m),
+              onEditLanguage: (m) => _openLanguageEditor(existing: m),
+              onDeleteExperience: _deleteExperience,
+              onDeleteEducation: _deleteEducation,
+              onDeleteSkill: _deleteSkill,
+              onDeleteLanguage: _deleteLanguage,
+            ),
+            _DocumentsTab(
+              docsFuture: _docsFuture!,
+              onRefresh: _refreshAll,
+              onUploadDoc: _uploadDocument,
+              onDeleteDoc: _deleteDocument,
+            ),
+            _SecurityTab(
+              secFuture: _secFuture!,
+              secEventsFuture: _secEventsFuture!,
+              onRefresh: _refreshAll,
+              onUpdateToggles: _updateSecurityToggles,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
+// ============================================================================
+// Composants réutilisables
+// ============================================================================
+
+// --- AppBar avec onglets ---
 class _ProfileTabbedTopBar extends StatelessWidget implements PreferredSizeWidget {
   const _ProfileTabbedTopBar({required this.title, this.subtitle, this.onMenuTap, this.trailing, required this.tabs});
   final String title;
@@ -608,6 +619,7 @@ class _ProfileTabbedTopBar extends StatelessWidget implements PreferredSizeWidge
   }
 }
 
+// --- FAB rapide ---
 class _QuickFabRow extends StatelessWidget {
   const _QuickFabRow({required this.onScan, required this.onChat});
   final VoidCallback onScan;
@@ -644,6 +656,7 @@ class _QuickFabRow extends StatelessWidget {
   }
 }
 
+// --- Onglet Dashboard ---
 class _DashboardTab extends StatelessWidget {
   const _DashboardTab({
     required this.profileFuture,
@@ -659,6 +672,7 @@ class _DashboardTab extends StatelessWidget {
     required this.onSharePublic,
     required this.onShowQr,
     required this.onLogout,
+    required this.onPrintCv,
   });
 
   final Future<Map<String, dynamic>?> profileFuture;
@@ -674,6 +688,7 @@ class _DashboardTab extends StatelessWidget {
   final Future<void> Function(Map<String, dynamic>? profile) onSharePublic;
   final VoidCallback onShowQr;
   final Future<void> Function() onLogout;
+  final VoidCallback onPrintCv;
 
   @override
   Widget build(BuildContext context) {
@@ -826,33 +841,29 @@ class _DashboardTab extends StatelessWidget {
           _SectionCard(
             title: 'Actions',
             child: Column(children: [
-              _ActionTile(icon: Icons.picture_as_pdf_outlined, title: 'Exporter CV (PDF)', subtitle: 'Impression / sauvegarde PDF depuis votre appareil', onTap: () => _openPdfFromContext(context, profileFuture, detailsFuture, expFuture, eduFuture, skillsFuture, langsFuture)),
+              _ActionTile(
+                icon: Icons.picture_as_pdf_outlined,
+                title: 'Exporter CV (PDF)',
+                subtitle: 'Impression / sauvegarde PDF depuis votre appareil',
+                onTap: onPrintCv,
+              ),
               const SizedBox(height: 10),
-              _ActionTile(icon: Icons.logout, title: 'Déconnexion', subtitle: 'Quitter votre session', onTap: onLogout, iconColor: cs.error),
+              _ActionTile(
+                icon: Icons.logout,
+                title: 'Déconnexion',
+                subtitle: 'Quitter votre session',
+                onTap: onLogout,
+                iconColor: cs.error,
+              ),
             ]),
           ),
         ],
       ),
     );
   }
-
-  Future<void> _openPdfFromContext(
-    BuildContext context,
-    Future<Map<String, dynamic>?> profileFuture,
-    Future<ProfileDetailsModel?> detailsFuture,
-    Future<List<ProfileExperienceModel>> expFuture,
-    Future<List<ProfileEducationModel>> eduFuture,
-    Future<List<ProfileSkillModel>> skillsFuture,
-    Future<List<ProfileLanguageModel>> langsFuture,
-  ) async {
-    final state = context.findAncestorStateOfType<_ProfilePageState>();
-    if (state == null) return;
-    final p = await profileFuture;
-    final d = await detailsFuture;
-    await state._printDigitalCv(p, d);
-  }
 }
 
+// --- Onglet Parcours ---
 class _ParcoursTab extends StatelessWidget {
   const _ParcoursTab({
     required this.detailsFuture,
@@ -1067,6 +1078,7 @@ class _PeriodText extends StatelessWidget {
   }
 }
 
+// --- Onglet Documents ---
 class _DocumentsTab extends StatefulWidget {
   const _DocumentsTab({required this.docsFuture, required this.onRefresh, required this.onUploadDoc, required this.onDeleteDoc});
   final Future<List<ProfileDocumentModel>> docsFuture;
@@ -1116,7 +1128,7 @@ class _DocumentsTabState extends State<_DocumentsTab> {
             trailing: PopupMenuButton<String>(
               onSelected: widget.onUploadDoc,
               itemBuilder: (context) => [
-                for (final t in _types) PopupMenuItem(value: t, child: Text('Uploader $t (1 USD)')),
+                for (final t in _types) PopupMenuItem(value: t, child: Text('Uploader $t')),
               ],
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1150,7 +1162,7 @@ class _DocumentsTabState extends State<_DocumentsTab> {
           _SectionCard(
             title: 'KYC avancé (CNI + Selfie)',
             child: Text(
-              'Dans cette première version, le KYC avancé enregistre la preuve en base (métadonnées). Le stockage de fichiers (Recto/Verso/Selfie) sera branché via Supabase Storage.',
+              'Utilisez l’upload ci‑dessus pour déposer vos pièces d’identité. Le selfie sera ajouté dans une prochaine version.',
               style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35),
             ),
           ),
@@ -1160,154 +1172,14 @@ class _DocumentsTabState extends State<_DocumentsTab> {
   }
 }
 
-class _PaymentsTab extends StatelessWidget {
-  const _PaymentsTab({
-    required this.profileFuture,
-    required this.detailsFuture,
-    required this.txFuture,
-    required this.onRefresh,
-    required this.onActivate,
-    required this.onPrintReceipt,
-    required this.onPrintCv,
-  });
-
-  final Future<Map<String, dynamic>?> profileFuture;
-  final Future<ProfileDetailsModel?> detailsFuture;
-  final Future<List<ProfileTransactionModel>> txFuture;
-  final VoidCallback onRefresh;
-  final ValueChanged<ProfileDetailsModel?> onActivate;
-  final void Function(Map<String, dynamic>? profile, ProfileDetailsModel? details, ProfileTransactionModel txn) onPrintReceipt;
-  final void Function(Map<String, dynamic>? profile, ProfileDetailsModel? details) onPrintCv;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final df = DateFormat('dd/MM/yyyy HH:mm');
-
-    return RefreshIndicator(
-      onRefresh: () async => onRefresh(),
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 10, AppSpacing.md, 120),
-        children: [
-          FutureBuilder<ProfileDetailsModel?>(
-            future: detailsFuture,
-            builder: (context, snap) {
-              final d = snap.data;
-              final pending = (d?.accountStatus ?? 'THIX-PENDING') == 'THIX-PENDING';
-              if (!pending) return const SizedBox.shrink();
-              return _SectionCard(
-                title: 'Compte en attente',
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Votre compte est en statut THIX-PENDING. Activez pour débloquer toutes les fonctionnalités (paiement fictif).', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant, height: 1.35)),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: () => onActivate(d),
-                    icon: Icon(Icons.bolt, color: cs.onPrimary),
-                    label: Text('Activer (1 USD)', style: TextStyle(color: cs.onPrimary)),
-                  ),
-                ]),
-              );
-            },
-          ),
-          const SizedBox(height: 14),
-          _SectionCard(
-            title: 'Exports',
-            child: FutureBuilder<Map<String, dynamic>?>(
-              future: profileFuture,
-              builder: (context, ps) {
-                return FutureBuilder<ProfileDetailsModel?>(
-                  future: detailsFuture,
-                  builder: (context, ds) {
-                    return Row(children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () => onPrintCv(ps.data, ds.data),
-                          icon: const Icon(Icons.picture_as_pdf_outlined),
-                          label: const Text('CV PDF'),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sélectionnez une transaction pour exporter le reçu.')));
-                          },
-                          icon: const Icon(Icons.receipt_long_outlined),
-                          label: const Text('Reçus'),
-                        ),
-                      ),
-                    ]);
-                  },
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 14),
-          _SectionCard(
-            title: 'Historique des transactions (simulé)',
-            child: FutureBuilder<List<ProfileTransactionModel>>(
-              future: txFuture,
-              builder: (context, snap) {
-                final tx = snap.data ?? const [];
-                if (tx.isEmpty) return Text('Aucune transaction.', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant));
-                return FutureBuilder<Map<String, dynamic>?>(
-                  future: profileFuture,
-                  builder: (context, ps) {
-                    return FutureBuilder<ProfileDetailsModel?>(
-                      future: detailsFuture,
-                      builder: (context, ds) {
-                        return Column(
-                          children: [
-                            for (final t in tx)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: InkWell(
-                                  onTap: () => onPrintReceipt(ps.data, ds.data, t),
-                                  splashColor: Colors.transparent,
-                                  highlightColor: Colors.transparent,
-                                  borderRadius: BorderRadius.circular(AppRadius.serviceCard),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(AppRadius.serviceCard), border: Border.all(color: cs.outline.withValues(alpha: 0.14))),
-                                    child: Row(children: [
-                                      Container(
-                                        width: 42,
-                                        height: 42,
-                                        decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(14)),
-                                        child: Icon(t.type == 'activation' ? Icons.bolt : Icons.upload_file, color: cs.onPrimaryContainer),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                                          Text(t.type, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
-                                          const SizedBox(height: 2),
-                                          Text(df.format(t.createdAt), style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-                                        ]),
-                                      ),
-                                      Text('\$${t.amountUsd.toStringAsFixed(2)}', style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
-                                      const SizedBox(width: 8),
-                                      Icon(Icons.picture_as_pdf_outlined, color: cs.onSurfaceVariant),
-                                    ]),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
+// --- Onglet Sécurité ---
 class _SecurityTab extends StatelessWidget {
-  const _SecurityTab({required this.secFuture, required this.secEventsFuture, required this.onRefresh, required this.onUpdateToggles});
+  const _SecurityTab({
+    required this.secFuture,
+    required this.secEventsFuture,
+    required this.onRefresh,
+    required this.onUpdateToggles,
+  });
   final Future<ProfileSecuritySettingsModel?> secFuture;
   final Future<List<ProfileSecurityEventModel>> secEventsFuture;
   final VoidCallback onRefresh;
@@ -1392,62 +1264,22 @@ class _SecurityTab extends StatelessWidget {
   }
 }
 
-class NotificationsSheet extends StatelessWidget {
-  const NotificationsSheet({super.key});
+// ============================================================================
+// Widgets assistants
+// ============================================================================
+
+class ThixAvatar extends StatelessWidget {
+  final double size;
+  final String initials;
+
+  const ThixAvatar({super.key, required this.size, required this.initials});
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.md, AppSpacing.lg),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Notifications', style: context.textStyles.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 6),
-          Text('Centre de notifications (version minimale).', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-          const SizedBox(height: 14),
-          _MiniNotifTile(icon: Icons.verified_outlined, title: 'Vérification', subtitle: 'Complétez vos documents pour accélérer le badge.'),
-          _MiniNotifTile(icon: Icons.picture_as_pdf_outlined, title: 'CV', subtitle: 'Votre CV numérique est prêt à être exporté.'),
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              onPressed: () => context.pop(),
-              child: Text('Fermer', style: TextStyle(color: cs.primary)),
-            ),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-class _MiniNotifTile extends StatelessWidget {
-  const _MiniNotifTile({required this.icon, required this.title, required this.subtitle});
-  final IconData icon;
-  final String title;
-  final String subtitle;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(AppRadius.serviceCard), border: Border.all(color: cs.outline.withValues(alpha: 0.14))),
-        child: Row(children: [
-          Container(width: 40, height: 40, decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: cs.onPrimaryContainer)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
-              const SizedBox(height: 2),
-              Text(subtitle, style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
-            ]),
-          ),
-        ]),
-      ),
+    return CircleAvatar(
+      radius: size / 2,
+      backgroundColor: Colors.white.withValues(alpha: 0.2),
+      child: Text(initials.isNotEmpty ? initials.substring(0, 1).toUpperCase() : 'T', style: TextStyle(color: Colors.white, fontSize: size * 0.4, fontWeight: FontWeight.w900)),
     );
   }
 }
@@ -1747,6 +1579,7 @@ class _DocumentTile extends StatelessWidget {
   }
 }
 
+// --- Calcul du THIX Score ---
 class _ThixScore {
   static int compute({
     required ProfileDetailsModel? details,
@@ -1755,7 +1588,6 @@ class _ThixScore {
     required List<ProfileSkillModel>? skills,
     required List<ProfileLanguageModel>? langs,
   }) {
-    // Simple, transparent scoring (10 points each).
     int points = 0;
     bool has(String? v) => (v ?? '').trim().isNotEmpty;
     if (has(details?.fullName)) points += 10;
@@ -1771,6 +1603,11 @@ class _ThixScore {
   }
 }
 
+// ============================================================================
+// Feuilles d’édition
+// ============================================================================
+
+// --- Identity Editor ---
 class IdentityEditorSheet extends StatefulWidget {
   const IdentityEditorSheet({super.key, required this.existing});
   final ProfileDetailsModel? existing;
@@ -1866,7 +1703,7 @@ class _IdentityEditorSheetState extends State<IdentityEditorSheet> {
             const SizedBox(height: 10),
             TextFormField(controller: _phone, decoration: const InputDecoration(labelText: 'Téléphone'), keyboardType: TextInputType.phone),
             const SizedBox(height: 10),
-            TextFormField(controller: _address, decoration: const InputDecoration(labelText: 'Adresse')), 
+            TextFormField(controller: _address, decoration: const InputDecoration(labelText: 'Adresse')),
             const SizedBox(height: 10),
             TextFormField(controller: _city, decoration: const InputDecoration(labelText: 'Ville')),
             const SizedBox(height: 10),
@@ -1909,6 +1746,7 @@ class _IdentityEditorSheetState extends State<IdentityEditorSheet> {
   }
 }
 
+// --- Visibility Editor ---
 class VisibilityEditorSheet extends StatefulWidget {
   const VisibilityEditorSheet({super.key, required this.existing});
   final ProfileDetailsModel? existing;
@@ -1988,6 +1826,7 @@ class _VisibilityEditorSheetState extends State<VisibilityEditorSheet> {
   }
 }
 
+// --- Emergency Contact Editor ---
 class _EmergencyContactDraft {
   const _EmergencyContactDraft({required this.name, required this.phone, required this.relationship, required this.city});
   final String name;
@@ -2063,6 +1902,7 @@ class _EmergencyContactEditorSheetState extends State<EmergencyContactEditorShee
   }
 }
 
+// --- Experience Editor ---
 class ExperienceEditorSheet extends StatefulWidget {
   const ExperienceEditorSheet({super.key, required this.existing});
   final ProfileExperienceModel? existing;
@@ -2193,6 +2033,7 @@ class _ExperienceEditorSheetState extends State<ExperienceEditorSheet> {
   }
 }
 
+// --- Education Editor ---
 class EducationEditorSheet extends StatefulWidget {
   const EducationEditorSheet({super.key, required this.existing});
   final ProfileEducationModel? existing;
@@ -2304,6 +2145,7 @@ class _EducationEditorSheetState extends State<EducationEditorSheet> {
   }
 }
 
+// --- Skill Editor ---
 class SkillEditorSheet extends StatefulWidget {
   const SkillEditorSheet({super.key, required this.existing});
   final ProfileSkillModel? existing;
@@ -2384,6 +2226,7 @@ class _SkillEditorSheetState extends State<SkillEditorSheet> {
   }
 }
 
+// --- Language Editor ---
 class LanguageEditorSheet extends StatefulWidget {
   const LanguageEditorSheet({super.key, required this.existing});
   final ProfileLanguageModel? existing;
@@ -2446,6 +2289,67 @@ class _LanguageEditorSheetState extends State<LanguageEditorSheet> {
             },
             icon: Icon(Icons.save, color: cs.onPrimary),
             label: Text('Enregistrer', style: TextStyle(color: cs.onPrimary)),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+// --- Notifications Sheet ---
+class NotificationsSheet extends StatelessWidget {
+  const NotificationsSheet({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.md, AppSpacing.lg),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Notifications', style: context.textStyles.titleLarge?.copyWith(fontWeight: FontWeight.w900)),
+          const SizedBox(height: 6),
+          Text('Centre de notifications (version minimale).', style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+          const SizedBox(height: 14),
+          _MiniNotifTile(icon: Icons.verified_outlined, title: 'Vérification', subtitle: 'Complétez vos documents pour accélérer le badge.'),
+          _MiniNotifTile(icon: Icons.picture_as_pdf_outlined, title: 'CV', subtitle: 'Votre CV numérique est prêt à être exporté.'),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: () => context.pop(),
+              child: Text('Fermer', style: TextStyle(color: cs.primary)),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _MiniNotifTile extends StatelessWidget {
+  const _MiniNotifTile({required this.icon, required this.title, required this.subtitle});
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: cs.surface, borderRadius: BorderRadius.circular(AppRadius.serviceCard), border: Border.all(color: cs.outline.withValues(alpha: 0.14))),
+        child: Row(children: [
+          Container(width: 40, height: 40, decoration: BoxDecoration(color: cs.primaryContainer, borderRadius: BorderRadius.circular(14)), child: Icon(icon, color: cs.onPrimaryContainer)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: context.textStyles.titleSmall?.copyWith(fontWeight: FontWeight.w900)),
+              const SizedBox(height: 2),
+              Text(subtitle, style: context.textStyles.bodySmall?.copyWith(color: cs.onSurfaceVariant)),
+            ]),
           ),
         ]),
       ),
