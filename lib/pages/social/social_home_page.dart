@@ -1,5 +1,5 @@
-import 'dart:io';
 import 'dart:ui';
+import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -157,15 +157,21 @@ class _SocialHomeViewState extends State<_SocialHomeView> {
 
   // --- Création de story avec upload réel ---
   Future<void> _showCreateStorySheet(BuildContext context) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.image,
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final file = File(result.files.single.path!);
+    final file = result.files.single;
+    final Uint8List? bytes = file.bytes;
+    if (bytes == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible de lire le fichier.')));
+      return;
+    }
     final controller = context.read<SocialModuleController>();
     try {
-      await controller.createStory(mediaFile: file);
+      await controller.createStory(mediaBytes: bytes, fileName: file.name);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Story publiée')));
     } catch (e) {
@@ -175,9 +181,19 @@ class _SocialHomeViewState extends State<_SocialHomeView> {
 
   // --- Ouverture d'une story avec page dédiée ---
   void _openStory(BuildContext context, SocialStory story) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => StoryViewerPage(story: story)),
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Story',
+      pageBuilder: (context, __, ___) => StoryViewerPage(story: story),
+      transitionDuration: const Duration(milliseconds: 220),
+      transitionBuilder: (context, animation, __, child) {
+        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(scale: Tween<double>(begin: 0.98, end: 1).animate(curved), child: child),
+        );
+      },
     );
   }
 

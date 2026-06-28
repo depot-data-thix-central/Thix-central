@@ -475,6 +475,7 @@ class SocialStory {
     required this.createdAt,
     required this.expiresAt,
     this.mediaUrl,
+    this.caption,
     this.isVideo = false,
     this.viewCount = 0,
     this.isViewed = false,
@@ -485,9 +486,67 @@ class SocialStory {
   final DateTime createdAt;
   final DateTime expiresAt;
   final String? mediaUrl;
+  final String? caption;
   final bool isVideo;
   final int viewCount;
   final bool isViewed;
+
+  SocialStory copyWith({
+    String? id,
+    SocialAuthor? author,
+    DateTime? createdAt,
+    DateTime? expiresAt,
+    String? mediaUrl,
+    String? caption,
+    bool? isVideo,
+    int? viewCount,
+    bool? isViewed,
+  }) {
+    return SocialStory(
+      id: id ?? this.id,
+      author: author ?? this.author,
+      createdAt: createdAt ?? this.createdAt,
+      expiresAt: expiresAt ?? this.expiresAt,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
+      caption: caption ?? this.caption,
+      isVideo: isVideo ?? this.isVideo,
+      viewCount: viewCount ?? this.viewCount,
+      isViewed: isViewed ?? this.isViewed,
+    );
+  }
+
+  factory SocialStory.fromJson(Map<String, dynamic> json) {
+    final authorJson = (json['author'] is Map) ? (json['author'] as Map).cast<String, dynamic>() : <String, dynamic>{};
+    return SocialStory(
+      id: (json['id'] ?? '').toString(),
+      author: SocialAuthor.fromJson({
+        'id': json['user_id'] ?? authorJson['id'],
+        'author_name': authorJson['display_name'] ?? authorJson['name'] ?? json['author_name'],
+        'author_role': authorJson['occupation'] ?? authorJson['role'] ?? json['author_role'],
+        'avatar_url': authorJson['avatar_url'] ?? json['author_avatar_url'],
+        'is_verified': authorJson['is_verified'] ?? json['author_is_verified'],
+      }),
+      mediaUrl: json['media_url']?.toString() ?? json['mediaUrl']?.toString(),
+      caption: json['caption']?.toString(),
+      createdAt: DateTime.tryParse((json['created_at'] ?? '').toString()) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      expiresAt: DateTime.tryParse((json['expires_at'] ?? '').toString()) ?? DateTime.fromMillisecondsSinceEpoch(0),
+      isVideo: (json['is_video'] as bool?) ?? false,
+      viewCount: (json['view_count'] as num?)?.toInt() ?? 0,
+      isViewed: (json['is_viewed'] as bool?) ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'user_id': author.id,
+        'media_url': mediaUrl,
+        'caption': caption,
+        'created_at': createdAt.toIso8601String(),
+        'expires_at': expiresAt.toIso8601String(),
+        'is_video': isVideo,
+        'view_count': viewCount,
+        'is_viewed': isViewed,
+      };
 }
 
 @immutable

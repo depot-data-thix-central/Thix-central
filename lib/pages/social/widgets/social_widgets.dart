@@ -1,11 +1,9 @@
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:thix_central/pages/social/models/social_models.dart';
 import 'package:thix_central/pages/social/providers/social_module_controller.dart';
-import 'package:thix_central/pages/social/story_viewer_page.dart'; // Assurez-vous que le chemin est correct
+import 'package:thix_central/pages/social/widgets/story_viewer_page.dart';
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
 
@@ -126,14 +124,20 @@ class SocialStoryStrip extends StatelessWidget {
   }
 
   void _showCreateStorySheet(BuildContext context, SocialModuleController controller) async {
-    final result = await FilePicker.platform.pickFiles(
+    final result = await FilePicker.pickFiles(
       type: FileType.image,
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final file = File(result.files.single.path!);
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible de lire le fichier.')));
+      return;
+    }
     try {
-      await controller.createStory(mediaFile: file);
+      await controller.createStory(mediaBytes: bytes, fileName: file.name);
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Story publiée')));
     } catch (e) {
@@ -143,9 +147,19 @@ class SocialStoryStrip extends StatelessWidget {
   }
 
   void _openStory(BuildContext context, SocialStory story) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => StoryViewerPage(story: story)),
+    showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Story',
+      pageBuilder: (context, __, ___) => StoryViewerPage(story: story),
+      transitionDuration: const Duration(milliseconds: 220),
+      transitionBuilder: (context, animation, __, child) {
+        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(scale: Tween<double>(begin: 0.98, end: 1).animate(curved), child: child),
+        );
+      },
     );
   }
 }
@@ -618,7 +632,8 @@ class _ChallengeWidget extends StatelessWidget {
     );
   }
 
-  String _formatDate(DateTime date) {
+  String _formatDate(DateTime? date) {
+    if (date == null) return '—';
     return '${date.day}/${date.month}/${date.year}';
   }
 }
@@ -869,7 +884,7 @@ class SocialUploadButton extends StatelessWidget {
   });
 
   final String label;
-  final Future<void> Function(File file) onUpload;
+  final Future<void> Function(List<int> bytes, String fileName) onUpload;
   final IconData icon;
   final FileType fileType;
   final List<String>? allowedExtensions;
@@ -878,15 +893,21 @@ class SocialUploadButton extends StatelessWidget {
   Widget build(BuildContext context) {
     return FilledButton.icon(
       onPressed: () async {
-        final result = await FilePicker.platform.pickFiles(
+        final result = await FilePicker.pickFiles(
           type: fileType,
           allowedExtensions: allowedExtensions,
           withData: true,
         );
         if (result == null || result.files.isEmpty) return;
-        final file = File(result.files.single.path!);
+        final picked = result.files.single;
+        final bytes = picked.bytes;
+        if (bytes == null) {
+          if (!context.mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Impossible de lire le fichier.')));
+          return;
+        }
         try {
-          await onUpload(file);
+          await onUpload(bytes, picked.name);
           if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('$label uploadé avec succès')),

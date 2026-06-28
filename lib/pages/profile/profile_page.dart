@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 
+// ignore: depend_on_referenced_packages
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -93,20 +94,22 @@ class _ProfilePageState extends State<ProfilePage> {
   // --- Upload réel de document ---
   Future<void> _uploadDocument(String docType) async {
     try {
-      final result = await FilePicker.platform.pickFiles(
+      final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png'],
+        withData: true,
       );
       if (result == null || result.files.isEmpty) return;
-      final file = File(result.files.single.path!);
-      final fileName = result.files.single.name;
+      final picked = result.files.single;
+      final Uint8List? bytes = picked.bytes;
+      final fileName = picked.name;
+      if (bytes == null) throw Exception('Impossible de lire le fichier');
 
       final supabase = SupabaseClientProvider.client;
       final userId = supabase.auth.currentUser!.id;
       final bucket = 'profile_docs';
       final path = '$userId/${DateTime.now().millisecondsSinceEpoch}_$fileName';
-      final response = await supabase.storage.from(bucket).upload(path, file);
-      if (response.error != null) throw Exception(response.error!.message);
+      await supabase.storage.from(bucket).uploadBinary(path, bytes);
 
       final publicUrl = supabase.storage.from(bucket).getPublicUrl(path);
 

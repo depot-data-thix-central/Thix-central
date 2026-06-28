@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -182,7 +182,7 @@ class SocialModuleController extends ChangeNotifier {
 
   /// Crée une story en téléchargeant le fichier média vers Supabase Storage,
   /// puis enregistre la story dans la base de données.
-  Future<void> createStory({required File mediaFile, String? caption}) async {
+  Future<void> createStory({required Uint8List mediaBytes, required String fileName, String? caption}) async {
     _isCreatingStory = true;
     notifyListeners();
 
@@ -193,9 +193,11 @@ class SocialModuleController extends ChangeNotifier {
       final userId = client.auth.currentUser?.id;
       if (userId == null) throw Exception('User not authenticated');
 
-      final bucket = 'stories'; // Nom du bucket
-      final path = 'stories/$userId/${DateTime.now().millisecondsSinceEpoch}_${mediaFile.path.split('/').last}';
-      await client.storage.from(bucket).upload(path, mediaFile);
+      // Bucket aligné sur la migration Supabase (supabase/migrations/20260627_002_social_module.sql)
+      final bucket = 'story-media';
+      final safeName = fileName.trim().isEmpty ? 'story_media' : fileName.trim();
+      final path = 'stories/$userId/${DateTime.now().millisecondsSinceEpoch}_$safeName';
+      await client.storage.from(bucket).uploadBinary(path, mediaBytes);
       final mediaUrl = client.storage.from(bucket).getPublicUrl(path);
 
       // 2. Enregistrer la story en base

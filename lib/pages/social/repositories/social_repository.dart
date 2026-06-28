@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/foundation.dart';
 import 'package:thix_central/market/services/supabase_client_provider.dart';
 import 'package:thix_central/pages/social/models/social_models.dart';
@@ -50,21 +48,23 @@ class ThixSocialRepository implements SocialRepository {
       throw Exception('User not authenticated');
     }
 
-    // 1. Récupérer les posts
-    final postsRows = await client.from('social_posts')
+    // 1) Posts
+    final postsRows = await client
+        .from('social_posts')
         .select('*')
         .order('created_at', ascending: false)
         .limit(30);
-    final posts = (postsRows as List)
-        .map((row) => SocialPost.fromJson(row))
-        .toList();
+    final posts = (postsRows as List).whereType<Map>().map((row) => SocialPost.fromJson(row.cast<String, dynamic>())).toList();
 
-    // 2. Récupérer les likes de l'utilisateur
+    // 2) Likes / bookmarks / comments (pour enrichissement UI)
     final postIds = posts.map((p) => p.id).toList();
     final likedIds = <String>{};
+    final bookmarkedIds = <String>{};
+    final latestCommentsByPostId = <String, List<SocialComment>>{};
     if (postIds.isNotEmpty) {
       try {
-        final likeRows = await client.from('social_post_likes')
+        final likeRows = await client
+            .from('social_post_likes')
             .select('post_id')
             .eq('user_id', currentUserId)
             .inFilter('post_id', postIds);
@@ -75,33 +75,54 @@ class ThixSocialRepository implements SocialRepository {
         debugPrint('Failed to load likes: $e');
         // On ne propage pas l'erreur ici, on continue sans likes
       }
-    }
-    final enrichedPosts = posts.map((p) => p.copyWith(isLiked: likedIds.contains(p.id))).toList();
 
-    // 3. Récupérer les stories
+      try {
+        final bookmarkRows = await client
+            .from('social_post_bookmarks')
+            .select('post_id')
+            .eq('user_id', currentUserId)
+            .inFilter('post_id', postIds);
+        bookmarkedIds.addAll((bookmarkRows as List)
+            .whereType<Map>()
+            .map((row) => (row['post_id'] ?? '').toString()));
+      } catch (e) {
+        debugPrint('Failed to load bookmarks: $e');
+      }
+
+      try {
+        final commentRows = await client
+            .from('social_post_comments')
+            .select('*')
+            .inFilter('post_id', postIds)
+            .order('created_at', ascending: false)
+            .limit(60);
+        for (final row in (commentRows as List).whereType<Map>()) {
+          final postId = (row['post_id'] ?? '').toString();
+          if (postId.isEmpty) continue;
+          latestCommentsByPostId.putIfAbsent(postId, () => <SocialComment>[]);
+          if (latestCommentsByPostId[postId]!.length >= 2) continue;
+          latestCommentsByPostId[postId]!.add(SocialComment.fromJson(row.cast<String, dynamic>()));
+        }
+      } catch (e) {
+        debugPrint('Failed to load comments: $e');
+      }
+    }
+
+    final enrichedPosts = posts
+        .map(
+          (p) => p.copyWith(
+            isLiked: likedIds.contains(p.id),
+            isBookmarked: bookmarkedIds.contains(p.id),
+            comments: latestCommentsByPostId[p.id] ?? const <SocialComment>[],
+          ),
+        )
+        .toList();
+
+    // 3) Stories
     final stories = await fetchStories();
 
-    // 4. Récupérer les suggestions (profil utilisateurs non connectés)
-    List<SocialConnectionSuggestion> suggestions = [];
-    try {
-      final profileRows = await client.from('profiles')
-          .select('id, display_name, occupation')
-          .neq('id', currentUserId)
-          .limit(10);
-      suggestions = (profileRows as List).map((row) {
-        final name = row['display_name'] ?? 'Inconnu';
-        final firstName = name.split(' ').first;
-        return SocialConnectionSuggestion(
-          id: row['id'].toString(),
-          name: name,
-          role: row['occupation'] ?? 'Membre',
-          mutualConnections: Random().nextInt(15) + 1,
-        );
-      }).toList();
-    } catch (e) {
-      debugPrint('Failed to load suggestions: $e');
-      // On laisse la liste vide, pas de fallback
-    }
+    // 4) Suggestions (sans mock) + statut connexion réel
+    final suggestions = await _fetchSuggestions(client: client, currentUserId: currentUserId);
 
     // 5. Récupérer les notifications
     List<SocialNotificationItem> notifications = [];
@@ -124,7 +145,7 @@ class ThixSocialRepository implements SocialRepository {
       // On laisse liste vide
     }
 
-    // 6. Construire le snapshot complet avec des données par défaut pour les parties non encore implémentées
+    // 6) Snapshot
     _cache = SocialModuleSnapshot(
       feed: enrichedPosts,
       stories: stories,
@@ -147,23 +168,38 @@ class ThixSocialRepository implements SocialRepository {
     final currentUserId = client.auth.currentUser?.id;
     if (currentUserId == null) throw Exception('User not authenticated');
 
-    final now = DateTime.now().toIso8601String();
-    final rows = await client.from('social_stories')
-        .select('*, author:profiles(*)')
-        .gt('expires_at', now)
+    final nowIso = DateTime.now().toIso8601String();
+    final rows = await client
+        .from('social_stories')
+        .select('*')
+        .gt('expires_at', nowIso)
         .order('created_at', ascending: false)
         .limit(20);
 
-    final stories = (rows as List).map((row) => SocialStory.fromJson(row)).toList();
+    final rawStories = (rows as List).whereType<Map>().map((row) => row.cast<String, dynamic>()).toList();
+    final authorIds = rawStories.map((row) => (row['author_id'] ?? '').toString()).where((id) => id.isNotEmpty).toSet().toList();
+    final profilesByUserId = await _fetchProfilesByUserId(client: client, userIds: authorIds);
 
-    // Marquer les stories déjà vues
+    var stories = rawStories.map((row) {
+      final authorId = (row['author_id'] ?? '').toString();
+      final profile = profilesByUserId[authorId];
+      return SocialStory.fromJson({
+        ...row,
+        'author': profile ?? <String, dynamic>{},
+        // SocialStory.fromJson attend parfois user_id
+        'user_id': authorId,
+      });
+    }).toList();
+
+    // Déterminer les stories vues
     if (stories.isNotEmpty) {
       try {
-        final viewedRows = await client.from('social_story_views')
+        final viewedRows = await client
+            .from('social_story_views')
             .select('story_id')
-            .eq('user_id', currentUserId);
-        final viewedIds = (viewedRows as List).map((row) => row['story_id'].toString()).toSet();
-        return stories.map((s) => s.copyWith(isViewed: viewedIds.contains(s.id))).toList();
+            .eq('viewer_id', currentUserId);
+        final viewedIds = (viewedRows as List).whereType<Map>().map((row) => (row['story_id'] ?? '').toString()).toSet();
+        stories = stories.map((s) => s.copyWith(isViewed: viewedIds.contains(s.id))).toList();
       } catch (e) {
         debugPrint('Failed to load story views: $e');
       }
@@ -178,10 +214,12 @@ class ThixSocialRepository implements SocialRepository {
     final userId = client.auth.currentUser?.id;
     if (userId == null) throw Exception('User not authenticated');
 
+    final profile = await _fetchProfile(client: client, userId: userId);
     await client.from('social_stories').insert({
-      'user_id': userId,
+      'author_id': userId,
+      'author_name': (profile?['display_name'] ?? profile?['full_name'] ?? 'Membre THIX').toString(),
       'media_url': mediaUrl,
-      'caption': caption,
+      if (caption != null && caption.trim().isNotEmpty) 'caption': caption.trim(),
       'expires_at': DateTime.now().add(const Duration(hours: 24)).toIso8601String(),
     });
 
@@ -196,16 +234,18 @@ class ThixSocialRepository implements SocialRepository {
     final currentUser = client.auth.currentUser;
     if (currentUser == null) throw Exception('User not authenticated');
 
+    final profile = await _fetchProfile(client: client, userId: currentUser.id);
     final author = SocialAuthor(
       id: currentUser.id,
-      name: currentUser.userMetadata?['display_name']?.toString() ?? 'Utilisateur',
-      role: currentUser.userMetadata?['headline']?.toString() ?? 'Membre',
-      isVerified: true,
+      name: (profile?['display_name'] ?? profile?['full_name'] ?? 'Membre THIX').toString(),
+      role: (profile?['headline'] ?? profile?['role'] ?? 'Professionnel').toString(),
+      avatarUrl: profile?['avatar_url']?.toString(),
+      isVerified: (profile?['is_verified'] as bool?) ?? false,
+      mutualConnections: 0,
     );
     final now = DateTime.now();
-    final id = 'post-${now.microsecondsSinceEpoch}';
     final base = SocialPost(
-      id: id,
+      id: '',
       author: author,
       content: input.content.trim(),
       kind: input.kind,
@@ -213,30 +253,40 @@ class ThixSocialRepository implements SocialRepository {
       updatedAt: now,
       likeCount: 0,
       commentCount: 0,
-      shareCount: input.repostSource == null ? 0 : 1,
-      viewCount: 1,
+      shareCount: 0,
+      viewCount: 0,
       isPinned: false,
     );
-    final post = _feedService.applyComposerData(base: base, input: input);
+    final composed = _feedService.applyComposerData(base: base, input: input);
 
-    // Insérer dans Supabase
-    final json = post.toJson();
-    // On retire les champs calculés (likeCount, commentCount, etc.) car ils seront mis à jour par triggers
-    json.remove('like_count');
-    json.remove('comment_count');
-    json.remove('share_count');
-    json.remove('view_count');
-    json.remove('is_pinned');
-    json.remove('is_liked');
-    json.remove('is_bookmarked');
-    json.remove('comments');
-    json['user_id'] = currentUser.id;
-    await client.from('social_posts').insert(json);
+    final insertPayload = <String, dynamic>{
+      'author_id': currentUser.id,
+      'author_name': composed.author.name,
+      'author_role': composed.author.role,
+      'author_avatar_url': composed.author.avatarUrl,
+      'author_is_verified': composed.author.isVerified,
+      'author_mutual_connections': composed.author.mutualConnections,
+      'content': composed.content,
+      'kind': composed.kind.name,
+      'visibility': composed.visibility.name,
+      'community_name': composed.communityName,
+      'quote': composed.quote,
+      'media_urls': composed.mediaUrls,
+      'hashtags': composed.hashtags,
+      'mentions': composed.mentions,
+      'poll': composed.poll?.toJson(),
+      'challenge': composed.challenge?.toJson(),
+      'repost_of_post_id': composed.repostOfPostId,
+      'repost_author_name': composed.repostAuthorName,
+    };
 
-    // Mettre à jour le cache
-    final updatedFeed = [post, ..._snapshot.feed];
-    _cache = _snapshot.copyWith(feed: updatedFeed);
-    return post;
+    final inserted = await client.from('social_posts').insert(insertPayload).select('*').single();
+    final post = SocialPost.fromJson((inserted as Map).cast<String, dynamic>());
+
+    // Enrich with viewer state
+    final enriched = post.copyWith(isLiked: false, isBookmarked: false, comments: const <SocialComment>[]);
+    _cache = _snapshot.copyWith(feed: [enriched, ..._snapshot.feed]);
+    return enriched;
   }
 
   @override
@@ -260,7 +310,10 @@ class ThixSocialRepository implements SocialRepository {
       } else {
         await client.from('social_post_likes').delete().eq('post_id', postId).eq('user_id', currentUserId);
       }
-      // Récupérer le post mis à jour depuis Supabase
+
+      // Garder le compteur cohérent même si les triggers ne sont pas encore installés
+      await client.from('social_posts').update({'like_count': newLikeCount}).eq('id', postId);
+
       final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
       if (refreshed != null) {
         final updated = SocialPost.fromJson(refreshed).copyWith(isLiked: isLiked);
@@ -339,6 +392,9 @@ class ThixSocialRepository implements SocialRepository {
         'author_avatar_url': author.avatarUrl,
         'text': comment.text,
       });
+
+      await client.from('social_posts').update({'comment_count': updated.commentCount}).eq('id', postId);
+
       // Rafraîchir le post pour mettre à jour commentCount
       final refreshed = await client.from('social_posts').select('*').eq('id', postId).maybeSingle();
       if (refreshed != null) {
@@ -388,34 +444,37 @@ class ThixSocialRepository implements SocialRepository {
     if (suggestionIndex == -1) throw Exception('Suggestion not found');
 
     final current = _snapshot.suggestions[suggestionIndex];
-    final newStatus = current.isConnected
-        ? 'none'
+    // Comportement:
+    // - Non connecté -> créer une demande (pending)
+    // - Demande envoyée -> annuler (delete)
+    // - Déjà connecté -> se déconnecter (delete)
+    final action = current.isConnected
+        ? 'disconnect'
         : current.isRequested
-            ? 'accepted'
-            : 'requested';
+            ? 'cancel'
+            : 'request';
 
-    // Optimistic update
-    final updatedSuggestion = current.copyWith(
-      isConnected: newStatus == 'accepted' || newStatus == 'none' && current.isConnected,
-      isRequested: newStatus == 'requested' || newStatus == 'accepted' && current.isRequested,
+    final optimistic = current.copyWith(
+      isConnected: action == 'disconnect' ? false : current.isConnected,
+      isRequested: action == 'request' ? true : false,
       isBlocked: false,
     );
     final updatedList = List<SocialConnectionSuggestion>.from(_snapshot.suggestions)
-      ..[suggestionIndex] = updatedSuggestion;
+      ..[suggestionIndex] = optimistic;
     _cache = _snapshot.copyWith(suggestions: updatedList);
 
     try {
-      if (newStatus == 'none') {
-        await client.from('social_connections')
-            .delete()
-            .eq('requester_id', currentUserId)
-            .eq('addressee_id', suggestionId);
-      } else {
+      if (action == 'request') {
         await client.from('social_connections').upsert({
           'requester_id': currentUserId,
-          'addressee_id': suggestionId,
-          'status': newStatus,
+          'receiver_id': suggestionId,
+          'status': 'pending',
         });
+      } else {
+        await client
+            .from('social_connections')
+            .delete()
+            .or('and(requester_id.eq.$currentUserId,receiver_id.eq.$suggestionId),and(requester_id.eq.$suggestionId,receiver_id.eq.$currentUserId)');
       }
     } catch (e) {
       // Revert
@@ -475,5 +534,128 @@ class ThixSocialRepository implements SocialRepository {
       }
     }
     return null;
+  }
+
+  Future<Map<String, dynamic>?> _fetchProfile({required SupabaseClient client, required String userId}) async {
+    try {
+      final profile = await client.from('profiles').select('user_id, display_name, avatar_url').eq('user_id', userId).maybeSingle();
+      final details = await client.from('profile_details').select('user_id, full_name').eq('user_id', userId).maybeSingle();
+      return {
+        if (profile != null) ...((profile as Map).cast<String, dynamic>()),
+        if (details != null) ...((details as Map).cast<String, dynamic>()),
+      };
+    } catch (e) {
+      debugPrint('Failed to load profile for $userId: $e');
+      return null;
+    }
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _fetchProfilesByUserId({
+    required SupabaseClient client,
+    required List<String> userIds,
+  }) async {
+    if (userIds.isEmpty) return {};
+    try {
+      final rows = await client.from('profiles').select('user_id, display_name, avatar_url').inFilter('user_id', userIds);
+      final map = <String, Map<String, dynamic>>{};
+      for (final row in (rows as List).whereType<Map>()) {
+        final id = (row['user_id'] ?? '').toString();
+        if (id.isEmpty) continue;
+        map[id] = row.cast<String, dynamic>();
+      }
+      return map;
+    } catch (e) {
+      debugPrint('Failed to batch load profiles: $e');
+      return {};
+    }
+  }
+
+  Future<List<SocialConnectionSuggestion>> _fetchSuggestions({
+    required SupabaseClient client,
+    required String currentUserId,
+  }) async {
+    try {
+      final profileRows = await client
+          .from('profiles')
+          .select('user_id, display_name, avatar_url')
+          .neq('user_id', currentUserId)
+          .limit(10);
+      final profiles = (profileRows as List).whereType<Map>().map((e) => e.cast<String, dynamic>()).toList();
+      if (profiles.isEmpty) return [];
+
+      final suggestedIds = profiles.map((p) => (p['user_id'] ?? '').toString()).where((id) => id.isNotEmpty).toList();
+
+      // Connexions de l'utilisateur courant (accepted)
+      final currentAcceptedRows = await client
+          .from('social_connections')
+          .select('requester_id, receiver_id')
+          .eq('status', 'accepted')
+          .or('requester_id.eq.$currentUserId,receiver_id.eq.$currentUserId');
+      final currentConnections = <String>{};
+      for (final row in (currentAcceptedRows as List).whereType<Map>()) {
+        final a = (row['requester_id'] ?? '').toString();
+        final b = (row['receiver_id'] ?? '').toString();
+        if (a == currentUserId && b.isNotEmpty) currentConnections.add(b);
+        if (b == currentUserId && a.isNotEmpty) currentConnections.add(a);
+      }
+
+      // Statut connexion (pending/accepted) entre l'utilisateur courant et les suggestions
+      final inList = suggestedIds.map((id) => '"$id"').join(',');
+      final relationRows = await client
+          .from('social_connections')
+          .select('requester_id, receiver_id, status')
+          .or('and(requester_id.eq.$currentUserId,receiver_id.in.($inList)),and(receiver_id.eq.$currentUserId,requester_id.in.($inList))');
+
+      Map<String, Map<String, dynamic>> relationByOther = {};
+      for (final row in (relationRows as List).whereType<Map>()) {
+        final r = (row['requester_id'] ?? '').toString();
+        final v = (row['receiver_id'] ?? '').toString();
+        final other = r == currentUserId ? v : r;
+        if (other.isEmpty) continue;
+        relationByOther[other] = row.cast<String, dynamic>();
+      }
+
+      // Mutual connections (réel): nombre de connexions acceptées entre la suggestion et les connexions de l'utilisateur.
+      Future<int> mutualCountFor(String suggestedId) async {
+        if (currentConnections.isEmpty) return 0;
+        final peersIn = currentConnections.map((id) => '"$id"').join(',');
+        try {
+          final rows = await client
+              .from('social_connections')
+              .select('id')
+              .eq('status', 'accepted')
+              .or('and(requester_id.eq.$suggestedId,receiver_id.in.($peersIn)),and(receiver_id.eq.$suggestedId,requester_id.in.($peersIn))');
+          return (rows as List).length;
+        } catch (e) {
+          debugPrint('Failed to compute mutual connections for $suggestedId: $e');
+          return 0;
+        }
+      }
+
+      final out = <SocialConnectionSuggestion>[];
+      for (final p in profiles) {
+        final id = (p['user_id'] ?? '').toString();
+        final displayName = (p['display_name'] ?? 'Membre THIX').toString();
+        final relation = relationByOther[id];
+        final status = (relation?['status'] ?? '').toString();
+        final isConnected = status == 'accepted';
+        final isRequested = status == 'pending' && (relation?['requester_id'] ?? '').toString() == currentUserId;
+        final mutual = await mutualCountFor(id);
+        out.add(
+          SocialConnectionSuggestion(
+            id: id,
+            name: displayName,
+            role: 'Professionnel',
+            mutualConnections: mutual,
+            isConnected: isConnected,
+            isRequested: isRequested,
+          ),
+        );
+      }
+      return out;
+    } catch (e) {
+      debugPrint('Failed to load suggestions: $e');
+      return [];
+    }
   }
 }
