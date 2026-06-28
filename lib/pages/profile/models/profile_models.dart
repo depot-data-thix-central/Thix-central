@@ -1,5 +1,8 @@
 import 'package:flutter/foundation.dart';
 
+// ============================================================
+// Contact d'urgence
+// ============================================================
 @immutable
 class EmergencyContactModel {
   const EmergencyContactModel({
@@ -77,6 +80,9 @@ class EmergencyContactModel {
   }
 }
 
+// ============================================================
+// Détails du profil (table profile_details)
+// ============================================================
 @immutable
 class ProfileDetailsModel {
   const ProfileDetailsModel({
@@ -220,6 +226,9 @@ class ProfileDetailsModel {
   }
 }
 
+// ============================================================
+// Expérience professionnelle (table profile_experiences)
+// ============================================================
 @immutable
 class ProfileExperienceModel {
   const ProfileExperienceModel({
@@ -344,6 +353,9 @@ class ProfileExperienceModel {
   }
 }
 
+// ============================================================
+// Formation (table profile_education)
+// ============================================================
 @immutable
 class ProfileEducationModel {
   const ProfileEducationModel({
@@ -406,6 +418,12 @@ class ProfileEducationModel {
     return DateTime.fromMillisecondsSinceEpoch(0);
   }
 
+  static int? _parseInt(dynamic v) {
+    if (v is int) return v;
+    if (v is String && v.trim().isNotEmpty) return int.tryParse(v.trim());
+    return null;
+  }
+
   static ProfileEducationModel fromJson(Map<String, dynamic> json) {
     final rawAttachments = json['attachments'];
     final attachments = <String>[];
@@ -415,7 +433,6 @@ class ProfileEducationModel {
         if (s != null && s.trim().isNotEmpty) attachments.add(s);
       }
     }
-    int? asInt(dynamic v) => v is int ? v : int.tryParse(v?.toString() ?? '');
 
     return ProfileEducationModel(
       id: (json['id'] ?? '').toString(),
@@ -423,8 +440,8 @@ class ProfileEducationModel {
       institution: (json['institution'] ?? '').toString(),
       degree: json['degree']?.toString(),
       level: json['level']?.toString(),
-      startYear: asInt(json['start_year']),
-      endYear: asInt(json['end_year']),
+      startYear: _parseInt(json['start_year']),
+      endYear: _parseInt(json['end_year']),
       description: json['description']?.toString(),
       attachments: attachments,
       createdAt: _parseTs(json['created_at']),
@@ -449,6 +466,9 @@ class ProfileEducationModel {
   }
 }
 
+// ============================================================
+// Compétence (table profile_skills)
+// ============================================================
 @immutable
 class ProfileSkillModel {
   const ProfileSkillModel({
@@ -520,6 +540,9 @@ class ProfileSkillModel {
   }
 }
 
+// ============================================================
+// Langue (table profile_languages)
+// ============================================================
 @immutable
 class ProfileLanguageModel {
   const ProfileLanguageModel({
@@ -585,6 +608,9 @@ class ProfileLanguageModel {
   }
 }
 
+// ============================================================
+// Document (table profile_documents)
+// ============================================================
 @immutable
 class ProfileDocumentModel {
   const ProfileDocumentModel({
@@ -607,6 +633,28 @@ class ProfileDocumentModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  ProfileDocumentModel copyWith({
+    String? id,
+    String? userId,
+    String? docType,
+    String? label,
+    String? fileUrl,
+    String? status,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return ProfileDocumentModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      docType: docType ?? this.docType,
+      label: label ?? this.label,
+      fileUrl: fileUrl ?? this.fileUrl,
+      status: status ?? this.status,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   static DateTime _parseTs(dynamic v) {
     if (v is DateTime) return v;
     if (v is String) return DateTime.tryParse(v) ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -625,55 +673,24 @@ class ProfileDocumentModel {
       updatedAt: _parseTs(json['updated_at']),
     );
   }
-}
 
-@immutable
-class ProfileTransactionModel {
-  const ProfileTransactionModel({
-    required this.id,
-    required this.userId,
-    required this.type,
-    required this.amountUsd,
-    required this.method,
-    required this.status,
-    required this.createdAt,
-    required this.updatedAt,
-  });
-
-  final String id;
-  final String userId;
-  final String type;
-  final double amountUsd;
-  final String method;
-  final String status;
-  final DateTime createdAt;
-  final DateTime updatedAt;
-
-  static DateTime _parseTs(dynamic v) {
-    if (v is DateTime) return v;
-    if (v is String) return DateTime.tryParse(v) ?? DateTime.fromMillisecondsSinceEpoch(0);
-    return DateTime.fromMillisecondsSinceEpoch(0);
-  }
-
-  static ProfileTransactionModel fromJson(Map<String, dynamic> json) {
-    double asDouble(dynamic v) {
-      if (v is num) return v.toDouble();
-      return double.tryParse(v?.toString() ?? '') ?? 0;
-    }
-
-    return ProfileTransactionModel(
-      id: (json['id'] ?? '').toString(),
-      userId: (json['user_id'] ?? '').toString(),
-      type: (json['txn_type'] ?? '').toString(),
-      amountUsd: asDouble(json['amount_usd']),
-      method: (json['method'] ?? 'SIMULATED').toString(),
-      status: (json['status'] ?? 'success').toString(),
-      createdAt: _parseTs(json['created_at']),
-      updatedAt: _parseTs(json['updated_at']),
-    );
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'doc_type': docType,
+      'label': label,
+      'file_url': fileUrl,
+      'status': status,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
   }
 }
 
+// ============================================================
+// Paramètres de sécurité (table profile_security_settings)
+// ============================================================
 @immutable
 class ProfileSecuritySettingsModel {
   const ProfileSecuritySettingsModel({
@@ -690,6 +707,22 @@ class ProfileSecuritySettingsModel {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  ProfileSecuritySettingsModel copyWith({
+    String? userId,
+    bool? biometricsEnabled,
+    bool? twoFaEnabled,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return ProfileSecuritySettingsModel(
+      userId: userId ?? this.userId,
+      biometricsEnabled: biometricsEnabled ?? this.biometricsEnabled,
+      twoFaEnabled: twoFaEnabled ?? this.twoFaEnabled,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
   static DateTime _parseTs(dynamic v) {
     if (v is DateTime) return v;
     if (v is String) return DateTime.tryParse(v) ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -705,8 +738,21 @@ class ProfileSecuritySettingsModel {
       updatedAt: _parseTs(json['updated_at']),
     );
   }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'user_id': userId,
+      'biometrics_enabled': biometricsEnabled,
+      'two_fa_enabled': twoFaEnabled,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+    };
+  }
 }
 
+// ============================================================
+// Événement de sécurité (table profile_security_events)
+// ============================================================
 @immutable
 class ProfileSecurityEventModel {
   const ProfileSecurityEventModel({
@@ -721,6 +767,20 @@ class ProfileSecurityEventModel {
   final String eventType;
   final DateTime createdAt;
 
+  ProfileSecurityEventModel copyWith({
+    String? id,
+    String? userId,
+    String? eventType,
+    DateTime? createdAt,
+  }) {
+    return ProfileSecurityEventModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      eventType: eventType ?? this.eventType,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
   static DateTime _parseTs(dynamic v) {
     if (v is DateTime) return v;
     if (v is String) return DateTime.tryParse(v) ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -734,5 +794,14 @@ class ProfileSecurityEventModel {
       eventType: (json['event_type'] ?? '').toString(),
       createdAt: _parseTs(json['created_at']),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'user_id': userId,
+      'event_type': eventType,
+      'created_at': createdAt.toIso8601String(),
+    };
   }
 }
