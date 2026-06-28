@@ -6,6 +6,8 @@ class ChatService {
 
   ChatService(this._client);
 
+  String? get currentUserId => _client.auth.currentUser?.id;
+
   /// Fetch conversations for current user
   Future<List<Conversation>> getConversations({int limit = 50, int offset = 0}) async {
     try {

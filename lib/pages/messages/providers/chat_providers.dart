@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:thix_central/market/services/supabase_client_provider.dart';
 import '../models/chat_models.dart';
 import '../services/chat_service.dart';
 import '../services/poll_service.dart';
@@ -7,7 +8,7 @@ import '../services/task_service.dart';
 
 // Service providers
 final supabaseClientProvider = Provider<SupabaseClient>((ref) {
-  return Supabase.instance.client;
+  return SupabaseClientProvider.client;
 });
 
 final chatServiceProvider = Provider<ChatService>((ref) {

@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:thix_central/theme.dart';
 import '../models/chat_models.dart';
 import '../providers/chat_providers.dart';
-import '../services/chat_service.dart';
 
 class GroupSettingsPage extends ConsumerStatefulWidget {
   final String conversationId;
