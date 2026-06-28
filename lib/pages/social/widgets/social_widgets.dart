@@ -2,12 +2,12 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'package:thix_central/pages/social/models/social_models.dart';
 import 'package:thix_central/pages/social/providers/social_module_controller.dart';
-import 'package:thix_central/pages/social/widgets/story_viewer_page.dart';
+import 'package:thix_central/pages/social/story_viewer_page.dart'; // Assurez-vous que le chemin est correct
 import 'package:thix_central/theme.dart';
 import 'package:thix_central/widgets/thix_app_bar.dart';
-import 'package:provider/provider.dart';
 
 // ============================================================
 // Carte de section générique
